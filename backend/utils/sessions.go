@@ -49,3 +49,13 @@ func expireCookie(w http.ResponseWriter, name string) {
 		HttpOnly: true,
 	})
 }
+
+// GetUserIDFromContext reads the user id string placed into the request context by AuthMiddleware
+func GetUserIDFromContext(r *http.Request) string {
+	if v := r.Context().Value(UserIDKey); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}

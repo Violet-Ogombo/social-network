@@ -5,6 +5,9 @@ $ErrorActionPreference = 'Stop'
 
 $base = 'http://localhost:8080'
 
+# Use a WebRequestSession so cookies are preserved across calls (works in Windows PowerShell and PowerShell Core)
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
 # simple register
 $body = @{
   email = "smoketest@example.com"
@@ -15,20 +18,29 @@ $body = @{
 
 Write-Host "Registering user..."
 try {
-  $res = Invoke-RestMethod -Uri "$base/register" -Method Post -Body $body -ContentType 'application/json' -SkipCertificateCheck
+  $res = Invoke-RestMethod -Uri "$base/register" -Method Post -Body $body -ContentType 'application/json' -WebSession $session
   Write-Host "Register response:" ($res | ConvertTo-Json -Depth 5)
 } catch {
-  Write-Host "Register failed:" $_.Exception.Response.StatusCode
-  $_.Exception.Response.GetResponseStream() | % { [Console]::Out.WriteLine((New-Object System.IO.StreamReader($_)).ReadToEnd()) }
+  Write-Host "Register failed:" $_.Exception.Message
+  if ($_.Exception -and $_.Exception.Response) {
+    try {
+      $stream = $_.Exception.Response.GetResponseStream()
+      $reader = New-Object System.IO.StreamReader($stream)
+      $bodyText = $reader.ReadToEnd()
+      Write-Host "Response body:" $bodyText
+    } catch {
+      Write-Host "Unable to read response stream:" $_
+    }
+  }
   exit 1
 }
 
 Write-Host "Checking session..."
 try {
-  $res = Invoke-RestMethod -Uri "$base/api/check-session" -Method Get -UseBasicParsing -Credential $null -SkipCertificateCheck -Headers @{Cookie=$(Get-ChildItem Variable: | Where-Object { $_.Name -eq 'COOKIE' } )}
+  $res = Invoke-RestMethod -Uri "$base/api/check-session" -Method Get -WebSession $session
   Write-Host "Check session response:" ($res | ConvertTo-Json -Depth 5)
 } catch {
-  Write-Host "Check session failed:" $_
+  Write-Host "Check session failed:" $_.Exception.Message
 }
 
 Write-Host "Smoke test completed. Please manually verify WebSocket behavior via the SPA or dev UI."

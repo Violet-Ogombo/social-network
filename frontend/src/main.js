@@ -5,6 +5,10 @@ import App from './App.vue'
 import { useAuthStore } from './store/auth'
 import { useChatStore } from './store/chat'
 
+// Bootstrap (CSS + JS bundle)
+import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap/dist/js/bootstrap.bundle.min.js'
+
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)

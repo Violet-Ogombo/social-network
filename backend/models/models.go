@@ -99,3 +99,26 @@ type Session struct {
 	CookieToken string    `json:"cookie_token"`
 	Expiry      time.Time `json:"expiry"`
 }
+
+type Follower struct {
+	ID         int64 `json:"id"`
+	FollowerID int64 `json:"follower_id"`
+	FollowedID int64 `json:"followed_id"`
+}
+
+type FollowRequest struct {
+	ID         int64  `json:"id"`
+	SenderID   int64  `json:"sender_id"`
+	ReceiverID int64  `json:"receiver_id"`
+	Status     string `json:"status"` // pending, accepted, declined
+}
+
+type Notification struct {
+	ID          int64  `json:"id"`
+	RecipientID int64  `json:"recipient_id"`
+	ActorID     int64  `json:"actor_id,omitempty"`
+	Type        string `json:"type"`
+	Data        string `json:"data,omitempty"`
+	IsRead      bool   `json:"is_read"`
+	CreatedAt   string `json:"created_at"`
+}
