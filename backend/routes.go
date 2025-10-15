@@ -17,6 +17,9 @@ func registerRoutes(mux *http.ServeMux) {
 	// Websocket endpoint (protected by auth middleware so context contains user ID)
 	mux.Handle("/ws", AuthMiddleware(http.HandlerFunc(HandleWebSocket)))
 
+	// chat message history
+	mux.Handle("/api/messages/history", AuthMiddleware(http.HandlerFunc(handlers.GetMessageHistory)))
+
 	// API endpoints
 	mux.HandleFunc("/register", handlers.RegisterHandler)
 	mux.HandleFunc("/login", handlers.LoginHandler)

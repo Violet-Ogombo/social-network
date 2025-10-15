@@ -41,13 +41,13 @@
 				<div class="d-flex align-items-center" v-if="user">
 					<!-- Notifications -->
 					<div class="dropdown me-3">
-						<button class="btn btn-outline-light position-relative" @click="toggleOpen" data-bs-toggle="dropdown">
+						<button class="btn btn-outline-light position-relative" @click="toggleOpen">
 							<i class="fas fa-bell"></i>
 							<span v-if="unreadCount" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
 								{{ unreadCount }}
 							</span>
 						</button>
-						<div class="dropdown-menu dropdown-menu-end p-0" style="width: 320px;" v-if="open">
+						<div class="dropdown-menu dropdown-menu-end p-0" style="width: 320px;" v-show="open">
 							<div class="dropdown-header bg-light">
 								<strong>Notifications</strong>
 							</div>
@@ -81,13 +81,13 @@
 					<!-- User Profile -->
 					<div class="dropdown">
 						<button class="btn btn-outline-light dropdown-toggle d-flex align-items-center" 
-								data-bs-toggle="dropdown" aria-expanded="false">
+								@click="profileOpen = !profileOpen" aria-expanded="false">
 							<img v-if="user.avatar" :src="user.avatar" alt="avatar" 
 								 class="rounded-circle me-2" style="width: 24px; height: 24px;" />
 							<i v-else class="fas fa-user-circle me-2"></i>
 							{{ user.nickname || user.user_id || 'You' }}
 						</button>
-						<ul class="dropdown-menu dropdown-menu-end">
+						<ul class="dropdown-menu dropdown-menu-end" v-show="profileOpen">
 							<li><router-link class="dropdown-item" to="/profile">
 								<i class="fas fa-user me-2"></i>My Profile
 							</router-link></li>
@@ -137,6 +137,8 @@ export default defineComponent({
 			if (open.value) await notif.fetch()
 		}
 
+		const profileOpen = ref(false)
+
 		const markAll = async () => {
 			await notif.markAllRead()
 		}
@@ -150,7 +152,7 @@ export default defineComponent({
 			location.href = '/'
 		}
 
-		return { user, notifications, unreadCount, open, toggleOpen, markAll, markRead, onLogout }
+	return { user, notifications, unreadCount, open, toggleOpen, markAll, markRead, onLogout, profileOpen }
 	}
 })
 </script>

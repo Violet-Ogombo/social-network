@@ -173,6 +173,13 @@ func (c *Client) readPump() {
 				SenderName: c.Nickname,
 				ReceiverID: raw.ReceiverID,
 			}
+
+			// parse createdAt (DB returns string) and set CreatedAt on outgoing message
+			if parsed, err := time.Parse("2006-01-02 15:04:05", createdAt); err == nil {
+				out.CreatedAt = parsed
+			} else if parsedRFC, err2 := time.Parse(time.RFC3339, createdAt); err2 == nil {
+				out.CreatedAt = parsedRFC
+			}
 			encoded, _ := json.Marshal(out)
 
 			clientsMutex.RLock()
@@ -343,12 +350,9 @@ func (c *Client) canSendMessage() bool {
 }
 
 func sendOnlineUsers(_ string) {
-	clientsMutex.RLock()
-	defer clientsMutex.RUnlock()
-
-	for userID, client := range clients {
-		go func(userID string, client *Client) {
-			rows, err := db.DB.Query(`
+	// Query once for the full user list (avoids running many parallel DB queries
+	// which can cause 'database is locked' errors under SQLite).
+	rows, err := db.DB.Query(`
 SELECT u.id,
 	u.nickname,
 	IFNULL(u.avatar, ''),
@@ -365,40 +369,63 @@ ORDER BY
 	is_online DESC,
 	last_msg DESC NULLS LAST,
 	u.nickname COLLATE NOCASE ASC
-	`, userID, userID, userID)
-			if err != nil {
-				log.Println("User fetch error:", err)
-				return
-			}
-			defer rows.Close()
+	`, "0", "0", "0") // placeholders; ordering is independent of requester
 
-			var users []map[string]interface{}
-			for rows.Next() {
-				var id, nickname, avatar string
-				var isOnline int
-				var lastMsg sql.NullString
-
-				if err := rows.Scan(&id, &nickname, &avatar, &isOnline, &lastMsg); err != nil {
-					continue
-				}
-				users = append(users, map[string]interface{}{
-					"id":        id,
-					"nickname":  nickname,
-					"avatar":    avatar,
-					"is_online": isOnline == 1,
-				})
-			}
-
-			jsonUsers, _ := json.Marshal(users)
-			update := models.Message{Type: "user_list", Content: string(jsonUsers)}
-			payload, _ := json.Marshal(update)
-
-			select {
-			case client.Send <- payload:
-			default:
-				close(client.Send)
-				client.Conn.Close()
-			}
-		}(userID, client)
+	if err != nil {
+		log.Println("User fetch error:", err)
+		return
 	}
+	defer rows.Close()
+
+	var users []map[string]interface{}
+	for rows.Next() {
+		var id, nickname, avatar string
+		var isOnline int
+		var lastMsg sql.NullString
+
+		if err := rows.Scan(&id, &nickname, &avatar, &isOnline, &lastMsg); err != nil {
+			continue
+		}
+		users = append(users, map[string]interface{}{
+			"id":        id,
+			"nickname":  nickname,
+			"avatar":    avatar,
+			"is_online": isOnline == 1,
+		})
+	}
+
+	jsonUsers, _ := json.Marshal(users)
+	update := models.Message{Type: "user_list", Content: string(jsonUsers)}
+	payload, _ := json.Marshal(update)
+
+	clientsMutex.RLock()
+	defer clientsMutex.RUnlock()
+	for _, client := range clients {
+		// broadcast same payload to all clients
+		sendToClient(client, payload)
+	}
+}
+
+// sendToClient tries to send a payload to a client's Send channel without blocking
+// the caller. It will attempt a non-blocking send first, then fall back to a
+// goroutine that will time out after a short period. This avoids closing the
+// connection for transient backpressure while still protecting the broadcaster.
+func sendToClient(c *Client, payload []byte) {
+	// fast path: if channel has capacity, send immediately
+	select {
+	case c.Send <- payload:
+		return
+	default:
+	}
+
+	// otherwise attempt a timed send in a goroutine
+	go func() {
+		select {
+		case c.Send <- payload:
+			return
+		case <-time.After(600 * time.Millisecond):
+			// timed out sending to slow client; drop the message silently
+			return
+		}
+	}()
 }
