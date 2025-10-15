@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -55,7 +56,22 @@ func InitDB() {
 	}
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		panic(fmt.Sprintf("Migration failed: %v", err))
+		if strings.Contains(err.Error(), "Dirty database version") {
+			var version int
+			if _, scanErr := fmt.Sscanf(err.Error(), "Dirty database version %d", &version); scanErr == nil {
+				log.Printf("Detected dirty migration at version %d; forcing clean state and retrying", version)
+				if forceErr := m.Force(version); forceErr != nil {
+					panic(fmt.Sprintf("Migration force failed: %v", forceErr))
+				}
+				if retryErr := m.Up(); retryErr != nil && retryErr != migrate.ErrNoChange {
+					panic(fmt.Sprintf("Migration retry failed: %v", retryErr))
+				}
+			} else {
+				panic(fmt.Sprintf("Migration failed and version couldn't be parsed: %v", err))
+			}
+		} else {
+			panic(fmt.Sprintf("Migration failed: %v", err))
+		}
 	}
 
 	// simple schema check: ensure required tables exist

@@ -89,9 +89,16 @@ export default {
     const userPostsCount = ref(0)
     
     const loadPosts = async () => { 
-      posts.value = await postApi.listPosts()
-      // Count user's posts (this would ideally come from an API)
-      userPostsCount.value = Math.floor(posts.value.length * 0.3) // Mock calculation
+      try {
+        const postData = await postApi.listPosts()
+        posts.value = postData || []
+        // Count user's posts (this would ideally come from an API)
+        userPostsCount.value = Math.floor((posts.value || []).length * 0.3) // Mock calculation
+      } catch (error) {
+        console.error("Failed to load posts:", error)
+        posts.value = []
+        userPostsCount.value = 0
+      }
     }
     
     onMounted(loadPosts)

@@ -29,6 +29,9 @@ export const useAuthStore = defineStore('auth', {
     },
     async logout() {
       await api.logout();
+      const chat = useChatStore()
+      chat.disconnect()
+      chat.$reset()
       this.user = null;
     },
     // Action to check if user is already logged in (via cookie)

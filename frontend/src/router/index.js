@@ -6,8 +6,10 @@ import Login from '@/pages/Login.vue'
 import Register from '@/pages/Register.vue'
 import Chat from '@/pages/Chat.vue'
 import Profile from '@/pages/Profile.vue'
+import People from '@/pages/People.vue'
 import GroupsList from '@/pages/GroupsList.vue'
 import Group from '@/pages/Group.vue'
+import EditProfile from '@/pages/EditProfile.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home, meta: { requiresAuth: true } },
@@ -16,7 +18,10 @@ const routes = [
   { path: '/login', name: 'Login', component: Login },
   { path: '/register', name: 'Register', component: Register },
   { path: '/chat', name: 'Chat', component: Chat, meta: { requiresAuth: true } },
-    { path: '/profile', name: 'Profile', component: Profile, meta: { requiresAuth: true } },
+  { path: '/people', name: 'People', component: People, meta: { requiresAuth: true } },
+  { path: '/profile', name: 'MyProfile', component: Profile, meta: { requiresAuth: true } },
+  { path: '/profile/:id', name: 'Profile', component: Profile, meta: { requiresAuth: true } },
+  { path: '/profile/edit', name: 'EditProfile', component: EditProfile, meta: { requiresAuth: true } },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes });

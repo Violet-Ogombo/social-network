@@ -54,13 +54,13 @@
             </label>
             <select v-model="privacy" class="form-select">
               <option value="public">
-                <i class="fas fa-globe"></i> Public
+                 Public
               </option>
               <option value="followers">
-                <i class="fas fa-users"></i> Followers Only
+                 Followers Only
               </option>
               <option value="private">
-                <i class="fas fa-lock"></i> Private
+                 Private
               </option>
             </select>
           </div>
@@ -103,7 +103,8 @@
 
 <script>
 import { ref } from 'vue'
-import * as api from '@/api/post'
+import * as postApi from '@/api/post'
+import { uploadFile } from '@/api'
 
 export default {
   emits: ['post-created'],
@@ -122,13 +123,20 @@ export default {
       if (!content.value.trim()) return
       
       try {
-        const fd = new FormData()
-        fd.append('content', content.value)
-        fd.append('privacy', privacy.value)
-        if (allowed.value) fd.append('allowed', allowed.value)
-        if (file.value) fd.append('image', file.value)
+        let imageUrl = '';
+        if (file.value) {
+          const uploadResponse = await uploadFile(file.value, 'post');
+          imageUrl = uploadResponse.url;
+        }
+
+        const postData = {
+          content: content.value,
+          privacy: privacy.value,
+          allowed: allowed.value,
+          image_url: imageUrl,
+        }
         
-        await api.createPost(fd)
+        await postApi.createPost(postData)
         
         // Reset form
         content.value = ''

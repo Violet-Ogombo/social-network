@@ -7,249 +7,300 @@ import (
 	"social-network/backend/db"
 	"social-network/backend/utils"
 	"strconv"
+	"strings"
 )
 
-// GET /api/profile?id=<id>  - if id omitted, returns current user's profile (requires auth cookie)
+// GET /api/profile/<id> - if id is omitted, returns current user's profile (requires auth cookie)
 func GetProfileHandler(w http.ResponseWriter, r *http.Request) {
-	idParam := r.URL.Query().Get("id")
+	// The user making the request. Can be empty if not logged in.
+	requestingUserIDStr := utils.GetUserIDFromContext(r)
+	if requestingUserIDStr == "" {
+		requestingUserIDStr = utils.GetUserIDFromSession(w, r)
+	}
+	var requestingID int64
+	if requestingUserIDStr != "" {
+		requestingID, _ = strconv.ParseInt(requestingUserIDStr, 10, 64)
+	}
+
+	// The user profile being requested.
+	pathSuffix := strings.TrimPrefix(r.URL.Path, "/api/profile")
+	targetUserIDStr := strings.Trim(pathSuffix, "/")
+	if targetUserIDStr == "" {
+		targetUserIDStr = strings.TrimSpace(r.URL.Query().Get("id"))
+	}
+
 	var targetID int64
 	var err error
-	if idParam == "" {
-		// require auth
-		uid := utils.GetUserIDFromContext(r)
-		if uid == "" {
-			utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+
+	// If no ID is in the URL, it means the user is requesting their own profile.
+	if targetUserIDStr == "" {
+		if requestingID == 0 {
+			utils.Error(w, http.StatusUnauthorized, "Not logged in")
 			return
 		}
-		targetID, err = strconv.ParseInt(uid, 10, 64)
-		if err != nil {
-			utils.Error(w, http.StatusUnauthorized, "Unauthorized")
-			return
-		}
+		targetID = requestingID
 	} else {
-		targetID, err = strconv.ParseInt(idParam, 10, 64)
+		// An ID is in the URL, so parse it.
+		targetID, err = strconv.ParseInt(targetUserIDStr, 10, 64)
 		if err != nil {
-			utils.Error(w, http.StatusBadRequest, "Invalid id")
+			utils.Error(w, http.StatusBadRequest, "Invalid user ID")
 			return
 		}
 	}
 
-	var user struct {
-		ID          int64          `json:"id"`
-		Email       sql.NullString `json:"email,omitempty"`
-		FirstName   sql.NullString `json:"first_name,omitempty"`
-		LastName    sql.NullString `json:"last_name,omitempty"`
-		DateOfBirth sql.NullString `json:"date_of_birth,omitempty"`
-		Avatar      sql.NullString `json:"avatar,omitempty"`
-		Nickname    sql.NullString `json:"nickname,omitempty"`
-		About       sql.NullString `json:"about,omitempty"`
-		ProfileType sql.NullString `json:"profile_type,omitempty"`
-		CreatedAt   sql.NullString `json:"created_at,omitempty"`
+	// At this point, we have the ID of the profile we want to view (targetID).
+	// Now, let's fetch that user's basic info and privacy setting.
+	var userBase struct {
+		ID          int64
+		Nickname    sql.NullString
+		Avatar      sql.NullString
+		ProfileType sql.NullString
 	}
-	err = db.DB.QueryRow(`SELECT id, email, first_name, last_name, date_of_birth, avatar, nickname, about_me, profile_type, created_at FROM users WHERE id = ?`, targetID).
-		Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.DateOfBirth, &user.Avatar, &user.Nickname, &user.About, &user.ProfileType, &user.CreatedAt)
+
+	err = db.DB.QueryRow(`SELECT id, nickname, avatar, profile_type FROM users WHERE id = ?`, targetID).
+		Scan(&userBase.ID, &userBase.Nickname, &userBase.Avatar, &userBase.ProfileType)
+
 	if err != nil {
-		utils.Error(w, http.StatusNotFound, "User not found")
+		if err == sql.ErrNoRows {
+			utils.Error(w, http.StatusNotFound, "User not found")
+			return
+		}
+		utils.Error(w, http.StatusInternalServerError, "Failed to fetch user")
 		return
 	}
 
-	// build response with only non-sensitive fields
-	resp := map[string]interface{}{
-		"id":            user.ID,
-		"first_name":    user.FirstName.String,
-		"last_name":     user.LastName.String,
-		"date_of_birth": user.DateOfBirth.String,
-		"avatar":        user.Avatar.String,
-		"nickname":      user.Nickname.String,
-		"about":         user.About.String,
-		"profile_type":  user.ProfileType.String,
-		"created_at":    user.CreatedAt.String,
+	profileType := strings.ToLower(strings.TrimSpace(userBase.ProfileType.String))
+	if profileType == "" {
+		profileType = "public"
 	}
-	// only include email when requester is the same user
-	if uid := utils.GetUserIDFromContext(r); uid != "" {
-		if parsed, _ := strconv.ParseInt(uid, 10, 64); parsed == user.ID {
-			resp["email"] = user.Email.String
+
+	// Authorization Logic
+	isOwnProfile := requestingID != 0 && targetID == requestingID
+	canViewProfile := false
+
+	// User is looking at their own profile
+	if isOwnProfile {
+		canViewProfile = true
+	} else if profileType == "public" {
+		// Profile is public, anyone can view
+		canViewProfile = true
+	} else if profileType == "private" {
+		// Profile is private, check if the requester is an accepted follower.
+		// This requires the requester to be logged in (requestingID != 0).
+		if requestingID != 0 {
+			var dummy int
+			err := db.DB.QueryRow(`SELECT 1 FROM followers WHERE follower_id = ? AND followed_id = ?`, requestingID, targetID).Scan(&dummy)
+			if err == nil {
+				canViewProfile = true
+			} else if err != sql.ErrNoRows {
+				utils.Error(w, http.StatusInternalServerError, "Failed to check follow status")
+				return
+			}
 		}
+		// If requester is not logged in, canViewProfile remains false for private profiles.
+	}
+
+	if !canViewProfile {
+		// User cannot view the full profile, send limited data
+		limitedProfile := map[string]interface{}{
+			"id":            userBase.ID,
+			"nickname":      userBase.Nickname.String,
+			"avatar":        userBase.Avatar.String,
+			"profile_type":  profileType,
+			"is_accessible": false,
+		}
+		utils.JSON(w, http.StatusOK, limitedProfile)
+		return
+	}
+
+	// If we get here, the user is authorized to see the full profile.
+	var fullProfile struct {
+		ID          int64
+		Email       sql.NullString
+		FirstName   sql.NullString
+		LastName    sql.NullString
+		DateOfBirth sql.NullString
+		Avatar      sql.NullString
+		Nickname    sql.NullString
+		About       sql.NullString
+		ProfileType sql.NullString
+		CreatedAt   sql.NullString
+	}
+
+	err = db.DB.QueryRow(`SELECT id, email, first_name, last_name, date_of_birth, avatar, nickname, about_me, profile_type, created_at FROM users WHERE id = ?`, targetID).
+		Scan(&fullProfile.ID, &fullProfile.Email, &fullProfile.FirstName, &fullProfile.LastName, &fullProfile.DateOfBirth, &fullProfile.Avatar, &fullProfile.Nickname, &fullProfile.About, &fullProfile.ProfileType, &fullProfile.CreatedAt)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Failed to load profile data")
+		return
+	}
+
+	if v := strings.ToLower(strings.TrimSpace(fullProfile.ProfileType.String)); v != "" {
+		profileType = v
+	}
+
+	resp := map[string]interface{}{
+		"id":            fullProfile.ID,
+		"first_name":    fullProfile.FirstName.String,
+		"last_name":     fullProfile.LastName.String,
+		"date_of_birth": fullProfile.DateOfBirth.String,
+		"avatar":        fullProfile.Avatar.String,
+		"nickname":      fullProfile.Nickname.String,
+		"about":         fullProfile.About.String,
+		"profile_type":  profileType,
+		"created_at":    fullProfile.CreatedAt.String,
+		"is_accessible": true,
+	}
+
+	if isOwnProfile && fullProfile.Email.Valid {
+		resp["email"] = fullProfile.Email.String
 	}
 
 	utils.JSON(w, http.StatusOK, resp)
 }
 
-// POST /api/profile/update - update current user's profile (protected)
+// PUT /api/profile/update
 func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
 	uid := utils.GetUserIDFromContext(r)
 	if uid == "" {
 		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	userID, err := strconv.ParseInt(uid, 10, 64)
-	if err != nil {
-		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
+
 	var payload struct {
-		Nickname    string `json:"nickname"`
 		FirstName   string `json:"first_name"`
 		LastName    string `json:"last_name"`
+		DateOfBirth string `json:"date_of_birth"`
 		Avatar      string `json:"avatar"`
+		Nickname    string `json:"nickname"`
 		About       string `json:"about"`
-		ProfileType string `json:"profile_type"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Invalid input")
+		utils.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	// validate profile type
-	pt := "public"
-	if payload.ProfileType != "" {
-		if payload.ProfileType == "private" {
-			pt = "private"
-		} else {
-			pt = "public"
-		}
-	}
-	_, err = db.DB.Exec(`UPDATE users SET nickname=?, first_name=?, last_name=?, avatar=?, about_me=?, profile_type=? WHERE id=?`, payload.Nickname, payload.FirstName, payload.LastName, payload.Avatar, payload.About, pt, userID)
+
+	_, err := db.DB.Exec(`
+		UPDATE users 
+		SET first_name = ?, last_name = ?, date_of_birth = ?, avatar = ?, nickname = ?, about_me = ?
+		WHERE id = ?`,
+		payload.FirstName, payload.LastName, payload.DateOfBirth, payload.Avatar, payload.Nickname, payload.About, uid,
+	)
+
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to update profile")
 		return
 	}
-	utils.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
+
+	w.WriteHeader(http.StatusOK)
 }
 
-// GET /api/profile/followers?id=<id> - list followers for user (protected to check access if profile private)
+// GET /api/profile/followers?id=<id>
 func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	idParam := r.URL.Query().Get("id")
-	var targetID int64
-	var err error
 	if idParam == "" {
-		uid := utils.GetUserIDFromContext(r)
-		if uid == "" {
-			utils.Error(w, http.StatusUnauthorized, "Unauthorized")
-			return
-		}
-		targetID, _ = strconv.ParseInt(uid, 10, 64)
-	} else {
-		targetID, err = strconv.ParseInt(idParam, 10, 64)
-		if err != nil {
-			utils.Error(w, http.StatusBadRequest, "Invalid id")
-			return
-		}
+		utils.Error(w, http.StatusBadRequest, "Missing user ID")
+		return
 	}
 
-	// If target profile is private and requester is not the same user and not a follower, deny
-	var profileType string
-	_ = db.DB.QueryRow("SELECT profile_type FROM users WHERE id = ?", targetID).Scan(&profileType)
-	requester := utils.GetUserIDFromContext(r)
-	if profileType == "private" {
-		// unauthenticated viewers are forbidden
-		if requester == "" {
-			utils.Error(w, http.StatusForbidden, "Profile is private")
-			return
-		}
-		// if requester is not the owner, check if requester is follower
-		reqID, _ := strconv.ParseInt(requester, 10, 64)
-		if reqID != targetID {
-			var cnt int
-			_ = db.DB.QueryRow("SELECT COUNT(1) FROM followers WHERE follower_id=? AND followed_id=?", reqID, targetID).Scan(&cnt)
-			if cnt == 0 {
-				utils.Error(w, http.StatusForbidden, "Profile is private")
-				return
-			}
-		}
-	}
-
-	rows, err := db.DB.Query("SELECT u.id, u.nickname, u.avatar FROM followers f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? ORDER BY f.created_at DESC", targetID)
+	rows, err := db.DB.Query(`
+		SELECT u.id, u.nickname, u.avatar 
+		FROM users u
+		JOIN followers f ON u.id = f.follower_id
+		WHERE f.followed_id = ?
+		ORDER BY f.created_at DESC`,
+		idParam,
+	)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to query followers")
 		return
 	}
 	defer rows.Close()
-	type uitem struct {
-		ID       int64  `json:"id"`
-		Nickname string `json:"nickname"`
-		Avatar   string `json:"avatar"`
-	}
-	var out []uitem
+
+	var followers []map[string]interface{}
 	for rows.Next() {
-		var it uitem
-		var avatar sql.NullString
-		if err := rows.Scan(&it.ID, &it.Nickname, &avatar); err != nil {
-			utils.Error(w, http.StatusInternalServerError, "Failed to read follower")
+		var id int
+		var nickname, avatar sql.NullString
+		if err := rows.Scan(&id, &nickname, &avatar); err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Failed to scan follower")
 			return
 		}
-		it.Avatar = avatar.String
-		out = append(out, it)
+		followers = append(followers, map[string]interface{}{
+			"id":       id,
+			"nickname": nickname.String,
+			"avatar":   avatar.String,
+		})
 	}
-	utils.JSON(w, http.StatusOK, out)
+
+	utils.JSON(w, http.StatusOK, followers)
 }
 
-// GET /api/profile/following?id=<id> - list users the target is following
+// GET /api/profile/following?id=<id>
 func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 	idParam := r.URL.Query().Get("id")
-	var targetID int64
-	var err error
 	if idParam == "" {
-		uid := utils.GetUserIDFromContext(r)
-		if uid == "" {
-			utils.Error(w, http.StatusUnauthorized, "Unauthorized")
-			return
-		}
-		targetID, _ = strconv.ParseInt(uid, 10, 64)
-	} else {
-		targetID, err = strconv.ParseInt(idParam, 10, 64)
-		if err != nil {
-			utils.Error(w, http.StatusBadRequest, "Invalid id")
-			return
-		}
+		utils.Error(w, http.StatusBadRequest, "Missing user ID")
+		return
 	}
-	rows, err := db.DB.Query("SELECT u.id, u.nickname, u.avatar FROM followers f JOIN users u ON f.followed_id = u.id WHERE f.follower_id = ? ORDER BY f.created_at DESC", targetID)
+
+	rows, err := db.DB.Query(`
+		SELECT u.id, u.nickname, u.avatar 
+		FROM users u
+		JOIN followers f ON u.id = f.followed_id
+		WHERE f.follower_id = ?
+		ORDER BY f.created_at DESC`,
+		idParam,
+	)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to query following")
 		return
 	}
 	defer rows.Close()
-	type uitem struct {
-		ID       int64  `json:"id"`
-		Nickname string `json:"nickname"`
-		Avatar   string `json:"avatar"`
-	}
-	var out []uitem
+
+	var following []map[string]interface{}
 	for rows.Next() {
-		var it uitem
-		var avatar sql.NullString
-		if err := rows.Scan(&it.ID, &it.Nickname, &avatar); err != nil {
-			utils.Error(w, http.StatusInternalServerError, "Failed to read following")
+		var id int
+		var nickname, avatar sql.NullString
+		if err := rows.Scan(&id, &nickname, &avatar); err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Failed to scan following")
 			return
 		}
-		it.Avatar = avatar.String
-		out = append(out, it)
+		following = append(following, map[string]interface{}{
+			"id":       id,
+			"nickname": nickname.String,
+			"avatar":   avatar.String,
+		})
 	}
-	utils.JSON(w, http.StatusOK, out)
+
+	utils.JSON(w, http.StatusOK, following)
 }
 
-// POST /api/profile/privacy - set profile privacy (protected)
+// POST /api/profile/privacy
 func TogglePrivacyHandler(w http.ResponseWriter, r *http.Request) {
 	uid := utils.GetUserIDFromContext(r)
 	if uid == "" {
 		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	userID, _ := strconv.ParseInt(uid, 10, 64)
+
 	var payload struct {
 		ProfileType string `json:"profile_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Invalid input")
+		utils.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	pt := "public"
-	if payload.ProfileType == "private" {
-		pt = "private"
+
+	if payload.ProfileType != "public" && payload.ProfileType != "private" {
+		utils.Error(w, http.StatusBadRequest, "Invalid profile type")
+		return
 	}
-	_, err := db.DB.Exec("UPDATE users SET profile_type=? WHERE id=?", pt, userID)
+
+	_, err := db.DB.Exec(`UPDATE users SET profile_type = ? WHERE id = ?`, payload.ProfileType, uid)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to update privacy")
 		return
 	}
-	utils.JSON(w, http.StatusOK, map[string]string{"status": "updated", "profile_type": pt})
+
+	utils.JSON(w, http.StatusOK, map[string]string{"status": "success", "profile_type": payload.ProfileType})
 }

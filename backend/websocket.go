@@ -349,18 +349,20 @@ func sendOnlineUsers(_ string) {
 	for userID, client := range clients {
 		go func(userID string, client *Client) {
 			rows, err := db.DB.Query(`
-SELECT u.id, u.nickname,
+SELECT u.id,
+	u.nickname,
+	IFNULL(u.avatar, ''),
 	CASE WHEN u.online_status = 1 THEN 1 ELSE 0 END AS is_online,
 	MAX(m.created_at) as last_msg
-	FROM users u
-	LEFT JOIN messages m ON (
-		(u.id = m.sender_id AND m.receiver_id = ?) OR
-		(u.id = m.receiver_id AND m.sender_id = ?)
-	)
-	WHERE u.id != ?
-	GROUP BY u.id
-	ORDER BY
-	is_online DESC,                   
+FROM users u
+LEFT JOIN messages m ON (
+	(u.id = m.sender_id AND m.receiver_id = ?) OR
+	(u.id = m.receiver_id AND m.sender_id = ?)
+)
+WHERE u.id != ?
+GROUP BY u.id
+ORDER BY
+	is_online DESC,
 	last_msg DESC NULLS LAST,
 	u.nickname COLLATE NOCASE ASC
 	`, userID, userID, userID)
@@ -372,16 +374,17 @@ SELECT u.id, u.nickname,
 
 			var users []map[string]interface{}
 			for rows.Next() {
-				var id, nickname string
+				var id, nickname, avatar string
 				var isOnline int
 				var lastMsg sql.NullString
 
-				if err := rows.Scan(&id, &nickname, &isOnline, &lastMsg); err != nil {
+				if err := rows.Scan(&id, &nickname, &avatar, &isOnline, &lastMsg); err != nil {
 					continue
 				}
 				users = append(users, map[string]interface{}{
 					"id":        id,
 					"nickname":  nickname,
+					"avatar":    avatar,
 					"is_online": isOnline == 1,
 				})
 			}

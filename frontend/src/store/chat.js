@@ -1,51 +1,223 @@
 import { defineStore } from 'pinia'
+import { useAuthStore } from '@/store/auth'
+
+const normalizeAvatar = (path) => {
+	if (!path) return ''
+	if (/^https?:/i.test(path)) return path
+	const normalized = path.startsWith('/') ? path : `/${path}`
+	return `${window.location.protocol}//${window.location.host}${normalized}`
+}
 
 export const useChatStore = defineStore('chat', {
 	state: () => ({
 		socket: null,
-		messages: [],
 		connected: false,
+		contacts: [],
+		conversations: {},
+		activeContactId: null,
+		errors: [],
+		typingUsers: {},
+		currentUserId: null,
 	}),
+	getters: {
+		activeConversation(state) {
+			const key = state.activeContactId ? String(state.activeContactId) : ''
+			return key && state.conversations[key] ? state.conversations[key] : []
+		},
+		activeContact(state) {
+			const key = state.activeContactId ? String(state.activeContactId) : ''
+			return state.contacts.find((c) => c.id === key) || null
+		},
+	},
 	actions: {
 		connect() {
 			if (this.socket && this.connected) return
-			this.socket = new WebSocket('ws://' + location.host + '/ws')
+			const url = `ws://${location.host}/ws`
+			this.socket = new WebSocket(url)
 			this.socket.onopen = () => {
 				this.connected = true
-				console.log('chat socket open')
+				this.currentUserId = this.getCurrentUserId()
+				this.requestUserList()
 			}
-			this.socket.onmessage = (e) => {
+			this.socket.onmessage = (event) => {
+				let payload
 				try {
-					const msg = JSON.parse(e.data)
-					this.addMessage(msg)
+					payload = JSON.parse(event.data)
 				} catch (err) {
-					console.error('invalid message', err)
+					console.error('chat: invalid payload', err)
+					return
 				}
+				this.handleMessage(payload)
 			}
 			this.socket.onclose = () => {
 				this.connected = false
 				this.socket = null
-				console.log('chat socket closed')
 			}
-			this.socket.onerror = (err) => console.error('chat socket error', err)
+			this.socket.onerror = (err) => {
+				console.error('chat socket error', err)
+				this.pushError('Connection problem. Please try again.')
+			}
 		},
 		disconnect() {
 			if (this.socket) {
 				this.socket.close()
-				this.socket = null
-				this.connected = false
+			}
+			this.socket = null
+			this.connected = false
+		},
+		getCurrentUserId() {
+			const auth = useAuthStore()
+			return auth.user ? String(auth.user.user_id) : this.currentUserId || ''
+		},
+		requestUserList() {
+			if (this.socket && this.connected) {
+				this.socket.send(JSON.stringify({ type: 'user_list_request' }))
+			}
+		},
+		handleMessage(msg) {
+			switch (msg.type) {
+				case 'user_list':
+					this.handleUserList(msg)
+					break
+				case 'message':
+					this.handleChatMessage(msg)
+					break
+				case 'typing':
+					this.typingUsers[String(msg.sender_id)] = true
+					break
+				case 'stop_typing':
+					delete this.typingUsers[String(msg.sender_id)]
+					break
+				case 'error':
+					this.pushError(msg.content || 'Unable to deliver message.')
+					break
+				case 'new_message_notification':
+					break
+				default:
+					break
+			}
+		},
+		handleUserList(msg) {
+			let users = []
+			if (Array.isArray(msg.users)) {
+				users = msg.users
+			} else if (msg.content) {
+				try {
+					users = JSON.parse(msg.content)
+				} catch (err) {
+					console.error('chat: cannot parse user list', err)
+					return
+				}
+			}
+			const normalized = users.map((user) => {
+				const id = String(user.id)
+				const existing = this.contacts.find((c) => c.id === id)
+				return {
+					id,
+					nickname: user.nickname || user.display_name || `User ${id}`,
+					displayName: user.display_name || user.nickname || `User ${id}`,
+					avatar: normalizeAvatar(user.avatar),
+					isOnline: !!user.is_online,
+					unread: existing ? existing.unread : 0,
+				}
+			})
+			this.contacts = normalized
+			if (this.activeContactId && !this.contacts.find((c) => c.id === this.activeContactId)) {
+				const fallback = this.contacts.length ? this.contacts[0].id : null
+				this.activeContactId = null
+				if (fallback) {
+					this.setActiveContact(fallback)
+				}
+			} else if (!this.activeContactId && this.contacts.length) {
+				this.setActiveContact(this.contacts[0].id)
+			}
+		},
+		ensureConversation(id) {
+			const key = String(id)
+			if (!this.conversations[key]) {
+				this.conversations[key] = []
+			}
+			return this.conversations[key]
+		},
+		handleChatMessage(msg) {
+			const me = this.getCurrentUserId()
+			const sender = String(msg.sender_id)
+			const receiver = String(msg.receiver_id)
+			const otherId = sender === me ? receiver : sender
+			if (!otherId) return
+
+			const conversation = this.ensureConversation(otherId)
+			conversation.push({
+				id: msg.id || `${Date.now()}-${conversation.length}`,
+				content: msg.content,
+				outgoing: sender === me,
+				senderName: msg.sender_name || '',
+				timestamp: msg.created_at || new Date().toISOString(),
+			})
+
+			if (this.activeContactId === otherId) {
+				this.markRead(otherId)
+			} else {
+				this.incrementUnread(otherId)
+			}
+
+			if (!this.contacts.find((c) => c.id === otherId)) {
+				this.contacts.push({
+					id: otherId,
+					nickname: msg.sender_name || `User ${otherId}`,
+					displayName: msg.sender_name || `User ${otherId}`,
+					avatar: '',
+					isOnline: true,
+					unread: sender === me ? 0 : 1,
+				})
+			}
+		},
+		setActiveContact(id) {
+			this.activeContactId = id ? String(id) : null
+			if (this.activeContactId) {
+				this.ensureConversation(this.activeContactId)
+				this.markRead(this.activeContactId)
+			}
+		},
+		incrementUnread(id) {
+			const contact = this.contacts.find((c) => c.id === String(id))
+			if (contact) {
+				contact.unread += 1
+			}
+		},
+		markRead(id) {
+			const contact = this.contacts.find((c) => c.id === String(id))
+			if (contact) {
+				contact.unread = 0
 			}
 		},
 		sendMessage(payload) {
-			if (!this.socket || !this.connected) {
-				console.warn('socket not connected')
+			if (!this.socket || !this.connected || this.socket.readyState !== WebSocket.OPEN) {
+				this.pushError('Socket not connected.')
 				return false
 			}
-			this.socket.send(JSON.stringify(payload))
+			const body = { ...payload }
+			if (!body.type) body.type = 'message'
+			if (!body.receiver_id) body.receiver_id = this.activeContactId
+			if (!body.receiver_id) {
+				this.pushError('Choose someone to chat with.')
+				return false
+			}
+			if (!body.content || !body.content.trim()) {
+				return false
+			}
+			body.receiver_id = String(body.receiver_id)
+			body.content = body.content.trim()
+			this.socket.send(JSON.stringify(body))
 			return true
 		},
-		addMessage(msg) {
-			this.messages.push(msg)
-		}
-	}
+		pushError(message) {
+			if (message) {
+				this.errors.push(message)
+			}
+		},
+		nextError() {
+			return this.errors.shift() || null
+		},
+	},
 })

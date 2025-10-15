@@ -3,18 +3,31 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"social-network/backend/db"
 	"social-network/backend/utils"
 	"strconv"
 	"strings"
 )
 
-// CreatePostHandler handles text + optional image posts
+// normalizeURL converts Windows-style paths to web-friendly URLs
+func normalizeURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.ReplaceAll(path, "//", "/")
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + strings.TrimLeft(path, "/")
+	}
+	return path
+}
+
+// CreatePostHandler handles creating a new post from a JSON payload
 func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	uid := utils.GetUserIDFromContext(r)
 	if uid == "" {
@@ -23,40 +36,44 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, _ := strconv.ParseInt(uid, 10, 64)
 
-	// parse multipart form for optional file
-	r.ParseMultipartForm(10 << 20) // 10MB
-	content := r.FormValue("content")
-	privacy := r.FormValue("privacy")
-	allowed := r.FormValue("allowed") // comma-separated ids for private
-
-	imageURL := ""
-	file, fh, err := r.FormFile("image")
-	if err == nil && file != nil {
-		defer file.Close()
-		os.MkdirAll("uploads", 0755)
-		fname := fmt.Sprintf("%d_%s", userID, filepath.Base(fh.Filename))
-		dst, _ := os.Create(filepath.Join("uploads", fname))
-		defer dst.Close()
-		io.Copy(dst, file)
-		imageURL = "/uploads/" + fname
+	var payload struct {
+		Content  string `json:"content"`
+		ImageURL string `json:"image_url"`
+		Privacy  string `json:"privacy"`
+		Allowed  string `json:"allowed"` // comma-separated ids for private
 	}
 
-	if privacy == "" {
-		privacy = "public"
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
 	}
 
-	_, err = db.DB.Exec("INSERT INTO posts (author_id, content, image_url, privacy, allowed_user_ids) VALUES (?, ?, ?, ?, ?)", userID, content, imageURL, privacy, allowed)
+	if payload.Content == "" {
+		utils.Error(w, http.StatusBadRequest, "Post content cannot be empty")
+		return
+	}
+
+	if payload.Privacy == "" {
+		payload.Privacy = "public"
+	}
+
+	imagePath := normalizeURL(payload.ImageURL)
+
+	_, err := db.DB.Exec("INSERT INTO posts (author_id, content, image_url, privacy, allowed_user_ids) VALUES (?, ?, ?, ?, ?)", userID, payload.Content, imagePath, payload.Privacy, payload.Allowed)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to create post")
 		return
 	}
-	utils.JSON(w, http.StatusOK, map[string]string{"status": "created"})
+	utils.JSON(w, http.StatusCreated, map[string]string{"status": "created"})
 }
 
 // ListFeedHandler returns posts visible to the requester
 func ListFeedHandler(w http.ResponseWriter, r *http.Request) {
 	// optional ?user_id to list a user's posts
 	viewer := utils.GetUserIDFromContext(r)
+	if viewer == "" {
+		viewer = utils.GetUserIDFromSession(w, r)
+	}
 	var viewerID int64
 	if viewer != "" {
 		viewerID, _ = strconv.ParseInt(viewer, 10, 64)
@@ -68,10 +85,17 @@ func ListFeedHandler(w http.ResponseWriter, r *http.Request) {
 	if qUser != "" {
 		// list posts by a specific user, but apply privacy
 		tid, _ := strconv.ParseInt(qUser, 10, 64)
-		rows, err = db.DB.Query("SELECT id, author_id, content, image_url, privacy, allowed_user_ids, created_at FROM posts WHERE author_id = ? ORDER BY created_at DESC", tid)
+		rows, err = db.DB.Query(`
+			SELECT p.id, p.author_id, p.content, p.image_url, p.privacy, p.allowed_user_ids, p.created_at, u.nickname 
+			FROM posts p JOIN users u ON p.author_id = u.id 
+			WHERE p.author_id = ? 
+			ORDER BY p.created_at DESC`, tid)
 	} else {
 		// feed: show public posts + posts from followed users + own private posts where allowed
-		rows, err = db.DB.Query("SELECT id, author_id, content, image_url, privacy, allowed_user_ids, created_at FROM posts ORDER BY created_at DESC")
+		rows, err = db.DB.Query(`
+			SELECT p.id, p.author_id, p.content, p.image_url, p.privacy, p.allowed_user_ids, p.created_at, u.nickname 
+			FROM posts p JOIN users u ON p.author_id = u.id 
+			ORDER BY p.created_at DESC`)
 	}
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to load posts")
@@ -80,22 +104,26 @@ func ListFeedHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type P struct {
-		ID       int64  `json:"id"`
-		AuthorID int64  `json:"author_id"`
-		Content  string `json:"content"`
-		ImageURL string `json:"image_url"`
-		Privacy  string `json:"privacy"`
-		Allowed  string `json:"allowed_user_ids"`
-		Created  string `json:"created_at"`
+		ID             int64        `json:"id"`
+		AuthorID       int64        `json:"author_id"`
+		AuthorNickname string       `json:"author_nickname"`
+		Content        string       `json:"content"`
+		ImageURL       string       `json:"image_url"`
+		Privacy        string       `json:"privacy"`
+		Allowed        string       `json:"allowed_user_ids"`
+		Created        string       `json:"created_at"`
+		Comments       []commentDTO `json:"comments"`
+		CommentCount   int          `json:"comment_count"`
 	}
 	var out []P
 	for rows.Next() {
 		var p P
 		var allowed sql.NullString
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.Content, &p.ImageURL, &p.Privacy, &allowed, &p.Created); err != nil {
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.Content, &p.ImageURL, &p.Privacy, &allowed, &p.Created, &p.AuthorNickname); err != nil {
 			continue
 		}
 		p.Allowed = allowed.String
+		p.ImageURL = normalizeURL(p.ImageURL)
 		// privacy enforcement: minimalistic
 		visible := false
 		if p.Privacy == "public" {
@@ -128,6 +156,17 @@ func ListFeedHandler(w http.ResponseWriter, r *http.Request) {
 			out = append(out, p)
 		}
 	}
+
+	if len(out) > 0 {
+		for i := range out {
+			comments, err := loadComments(out[i].ID)
+			if err != nil {
+				continue
+			}
+			out[i].Comments = comments
+			out[i].CommentCount = len(comments)
+		}
+	}
 	utils.JSON(w, http.StatusOK, out)
 }
 
@@ -140,17 +179,54 @@ func AddCommentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, _ := strconv.ParseInt(uid, 10, 64)
 	var payload struct {
-		PostID  int64  `json:"post_id"`
-		Content string `json:"content"`
+		PostID   int64  `json:"post_id"`
+		Content  string `json:"content"`
+		ImageURL string `json:"image_url,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Invalid input")
 		return
 	}
-	_, err := db.DB.Exec("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)", payload.PostID, userID, payload.Content)
+	imagePath := normalizeURL(payload.ImageURL)
+	_, err := db.DB.Exec("INSERT INTO comments (post_id, user_id, content, image_url) VALUES (?, ?, ?, ?)", payload.PostID, userID, payload.Content, imagePath)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to add comment")
 		return
 	}
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type commentDTO struct {
+	ID        int64  `json:"id"`
+	PostID    int64  `json:"post_id"`
+	UserID    int64  `json:"user_id"`
+	Nickname  string `json:"nickname"`
+	Content   string `json:"content"`
+	ImageURL  string `json:"image_url,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+func loadComments(postID int64) ([]commentDTO, error) {
+	rows, err := db.DB.Query(`
+		SELECT c.id, c.post_id, c.user_id, c.content, c.image_url, c.created_at, IFNULL(u.nickname, '')
+		FROM comments c
+		LEFT JOIN users u ON c.user_id = u.id
+		WHERE c.post_id = ?
+		ORDER BY c.created_at ASC`, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var comments []commentDTO
+	for rows.Next() {
+		var c commentDTO
+		var image sql.NullString
+		if err := rows.Scan(&c.ID, &c.PostID, &c.UserID, &c.Content, &image, &c.CreatedAt, &c.Nickname); err != nil {
+			continue
+		}
+		c.ImageURL = normalizeURL(image.String)
+		comments = append(comments, c)
+	}
+	return comments, nil
 }

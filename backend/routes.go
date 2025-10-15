@@ -28,9 +28,11 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/follow/accept", AuthMiddleware(http.HandlerFunc(handlers.AcceptFollowHandler)))
 	mux.Handle("/api/follow/decline", AuthMiddleware(http.HandlerFunc(handlers.DeclineFollowHandler)))
 	mux.Handle("/api/follow/requests", AuthMiddleware(http.HandlerFunc(handlers.ListRequests))) // GET list pending requests
+	mux.Handle("/api/follow/status", AuthMiddleware(http.HandlerFunc(handlers.FollowStatusHandler)))
 
 	// profile endpoints
-	mux.HandleFunc("/api/profile", handlers.GetProfileHandler) // GET public profile (id optional) or current if authenticated
+	// This handles /api/profile/ (for self) and /api/profile/<id> for others
+	mux.HandleFunc("/api/profile/", handlers.GetProfileHandler)
 	mux.Handle("/api/profile/update", AuthMiddleware(http.HandlerFunc(handlers.UpdateProfileHandler)))
 	mux.Handle("/api/profile/followers", AuthMiddleware(http.HandlerFunc(handlers.GetFollowersHandler)))
 	mux.Handle("/api/profile/following", AuthMiddleware(http.HandlerFunc(handlers.GetFollowingHandler)))
@@ -41,6 +43,8 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/posts", handlers.ListFeedHandler)
 
 	// notifications
+	// sanitized user list endpoint
+	mux.HandleFunc("/api/users", handlers.PublicUsersHandler)
 	mux.Handle("/api/notifications", AuthMiddleware(http.HandlerFunc(handlers.ListNotificationsHandler)))
 	mux.Handle("/api/notifications/mark-read", AuthMiddleware(http.HandlerFunc(handlers.MarkNotificationsReadHandler)))
 	mux.Handle("/api/group/create", AuthMiddleware(http.HandlerFunc(handlers.CreateGroupHandler)))
@@ -56,6 +60,8 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/posts/comment", AuthMiddleware(http.HandlerFunc(handlers.AddCommentHandler)))
 
 	// serve uploaded images
-	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("backend/uploads"))))
 
+	// upload endpoint
+	mux.Handle("/api/upload", AuthMiddleware(http.HandlerFunc(handlers.UploadHandler)))
 }

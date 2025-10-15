@@ -1,16 +1,21 @@
+<script setup>
+import { onMounted } from 'vue'
+import { useAuthStore } from '@/store/auth'
+import AppHeader from './components/AppHeader.vue'
+
+const auth = useAuthStore()
+
+onMounted(() => {
+  auth.fetchUser()
+})
+</script>
+
 <template>
 	<div id="app">
 		<AppHeader />
 		<router-view />
 	</div>
 </template>
-
-<script>
-import AppHeader from './components/AppHeader.vue'
-export default {
-	components: { AppHeader }
-}
-</script>
 
 <style>
 /* Global app styles */

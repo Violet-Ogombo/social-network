@@ -47,7 +47,9 @@ type Post struct {
 	ID             int       `json:"id"`
 	Title          string    `json:"title"`
 	Content        string    `json:"content"`
-	Author         string    `json:"author"`
+	ImageURL       string    `json:"image_url,omitempty"`
+	AuthorID       int       `json:"author_id"`
+	AuthorNickname string    `json:"author_nickname"`
 	CreatedAt      time.Time `json:"-"`
 	CreatedAtHuman string    `json:"created_at"`
 	Categories     []string  `json:"categories"`
@@ -58,6 +60,7 @@ type Comment struct {
 	PostID         int       `json:"post_id"`
 	UserID         string    `json:"user_id"`
 	Content        string    `json:"content"`
+	ImageURL       string    `json:"image_url,omitempty"`
 	ParentID       *int      `json:"parent_id,omitempty"`
 	CreatedAt      time.Time `json:"-"`
 	CreatedAtHuman string    `json:"created_at"`

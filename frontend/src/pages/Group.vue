@@ -1,7 +1,9 @@
 <template>
   <div class="container mt-4">
-    <h2>{{ group.group.name || 'Group' }}</h2>
-    <p v-if="group.group.description">{{ group.group.description }}</p>
+    <div v-if="group.group">
+      <h2>{{ group.group.name || 'Group' }}</h2>
+      <p v-if="group.group.description">{{ group.group.description }}</p>
+    </div>
     <div class="mb-3">
       <h5>Members: {{ group.members }}</h5>
     </div>
@@ -32,6 +34,7 @@ import { getGroup, listGroupPosts, createGroupPost, addGroupComment } from '../a
 import Comment from '@/components/Comment.vue'
 
 export default {
+  components: { Comment },
   data() { return { group: {}, posts: [], content: '', commentText: {} } },
   created() { this.load() },
   methods: {

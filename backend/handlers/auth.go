@@ -203,6 +203,13 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set user online status
+	_, err = db.DB.Exec("UPDATE users SET online_status = 1 WHERE id = ?", userID)
+	if err != nil {
+		log.Printf("Failed to update online status for user %d: %v", userID, err)
+		// Non-fatal error, so we don't abort the login
+	}
+
 	// Send cookie to browser
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
@@ -221,7 +228,22 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_token")
 	if err == nil {
+		// Get user ID before deleting the session
+		var userID int64
+		err := db.DB.QueryRow("SELECT user_id FROM sessions WHERE cookie_token = ?", cookie.Value).Scan(&userID)
+
+		// Delete the session
 		db.DB.Exec("DELETE FROM sessions WHERE cookie_token = ?", cookie.Value)
+
+		// Update online status if user ID was found
+		if err == nil {
+			_, err = db.DB.Exec("UPDATE users SET online_status = 0 WHERE id = ?", userID)
+			if err != nil {
+				log.Printf("Failed to update online status on logout for user %d: %v", userID, err)
+			}
+		}
+
+		// Expire the cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:   "session_token",
 			Value:  "",

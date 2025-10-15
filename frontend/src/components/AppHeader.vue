@@ -22,6 +22,11 @@
 						</router-link>
 					</li>
 					<li class="nav-item">
+						<router-link class="nav-link text-white" to="/people">
+							<i class="fas fa-user-friends me-1"></i>People
+						</router-link>
+					</li>
+					<li class="nav-item">
 						<router-link class="nav-link text-white" to="/chat">
 							<i class="fas fa-comments me-1"></i>Chat
 						</router-link>
@@ -46,7 +51,7 @@
 							<div class="dropdown-header bg-light">
 								<strong>Notifications</strong>
 							</div>
-							<div v-if="notifications.length === 0" class="dropdown-item-text text-muted text-center py-3">
+							<div v-if="!notifications || notifications.length === 0" class="dropdown-item-text text-muted text-center py-3">
 								No notifications
 							</div>
 							<div v-else>
@@ -112,6 +117,7 @@
 
 <script>
 import { defineComponent, ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notification'
 
@@ -120,9 +126,10 @@ export default defineComponent({
 		const auth = useAuthStore()
 		const notif = useNotificationStore()
 
-		const user = auth.user
-		const notifications = computed(() => notif.list || [])
-		const unreadCount = computed(() => notifications.value.filter(n => !n.is_read).length)
+		const { user } = storeToRefs(auth)
+		const { list: notifications } = storeToRefs(notif)
+		
+		const unreadCount = computed(() => (notifications.value || []).filter(n => !n.is_read).length)
 
 		const open = ref(false)
 		const toggleOpen = async () => {
@@ -143,7 +150,7 @@ export default defineComponent({
 			location.href = '/'
 		}
 
-		return { user, notifications: notifications.value, unreadCount: unreadCount.value, open, toggleOpen, markAll, markRead, onLogout }
+		return { user, notifications, unreadCount, open, toggleOpen, markAll, markRead, onLogout }
 	}
 })
 </script>

@@ -8,6 +8,8 @@ import (
 	"social-network/backend/db"
 	"social-network/backend/handlers"
 	"social-network/backend/utils"
+
+	"github.com/rs/cors"
 )
 
 func main() {
@@ -17,6 +19,15 @@ func main() {
 
 	mux := http.NewServeMux()
 	registerRoutes(mux)
+
+	// CORS handler
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:5174"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	})
+	handler := c.Handler(mux)
 
 	// Start periodic session cleanup
 	go func() {
@@ -28,7 +39,7 @@ func main() {
 	}()
 
 	log.Println("Server running on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", handler); err != nil {
 		log.Fatal(err)
 	}
 }

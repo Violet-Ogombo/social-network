@@ -1,3 +1,4 @@
+
 <template>
   <div class="card post-card">
     <!-- Post Header -->
@@ -7,22 +8,22 @@
           <i class="fas fa-user-circle fa-2x text-primary"></i>
         </div>
         <div>
-          <h6 class="mb-0 fw-semibold">{{ post.nickname || 'Anonymous User' }}</h6>
+          <h6 class="mb-0 fw-semibold">{{ post.author_nickname || 'Anonymous User' }}</h6>
           <small class="text-muted">
             <i class="far fa-clock me-1"></i>
             {{ formatDate(post.created_at) }}
           </small>
         </div>
       </div>
-      <div class="dropdown">
-        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+      <div class="post-menu" @click.stop="toggleMenu">
+        <button class="btn btn-sm btn-outline-secondary" type="button">
           <i class="fas fa-ellipsis-h"></i>
         </button>
-        <ul class="dropdown-menu">
-          <li><a class="dropdown-item" href="#"><i class="fas fa-share me-2"></i>Share</a></li>
-          <li><a class="dropdown-item" href="#"><i class="fas fa-bookmark me-2"></i>Save</a></li>
+        <ul v-if="menuOpen" class="dropdown-menu show">
+          <li><button class="dropdown-item" type="button"><i class="fas fa-share me-2"></i>Share</button></li>
+          <li><button class="dropdown-item" type="button"><i class="fas fa-bookmark me-2"></i>Save</button></li>
           <li><hr class="dropdown-divider"></li>
-          <li><a class="dropdown-item text-danger" href="#"><i class="fas fa-flag me-2"></i>Report</a></li>
+          <li><button class="dropdown-item text-danger" type="button"><i class="fas fa-flag me-2"></i>Report</button></li>
         </ul>
       </div>
     </div>
@@ -33,7 +34,7 @@
       
       <!-- Post Image -->
       <div v-if="post.image_url" class="post-image mb-3">
-        <img :src="post.image_url" class="img-fluid rounded" alt="Post image" />
+        <img :src="`http://localhost:8080${post.image_url}`" class="img-fluid rounded" alt="Post image" />
       </div>
 
       <!-- Post Actions -->
@@ -63,6 +64,11 @@
       <!-- Comments Section -->
       <div v-if="showComments" class="comments-section">
         <hr class="my-3">
+        <!-- List existing comments -->
+        <div v-for="comment in safeComments" :key="comment.id" class="mb-2">
+          <p class="mb-1"><strong>{{ comment.nickname || 'User' }}:</strong> {{ comment.content }}</p>
+          <img v-if="comment.image_url" :src="`http://localhost:8080${comment.image_url}`" class="img-fluid rounded" alt="Comment image" />
+        </div>
         <Comment :postId="post.id" @comment-added="onCommentAdded" />
       </div>
     </div>
@@ -70,8 +76,7 @@
 </template>
 
 <script>
-import { ref } from 'vue'
-import * as api from '@/api/post'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import Comment from './Comment.vue'
 export default {
   props: ['post'],
@@ -80,11 +85,29 @@ export default {
   setup(props, { emit }) {
     const showComments = ref(false)
     const isLiked = ref(false)
-    const likeCount = ref(Math.floor(Math.random() * 50)) // Mock data
-    const commentCount = ref(Math.floor(Math.random() * 10)) // Mock data
+    const likeCount = ref(0)
+    const menuOpen = ref(false)
+
+    const safeComments = computed(() => props.post.comments || [])
+    const commentCount = computed(() => props.post.comment_count ?? safeComments.value.length)
+
+    const closeMenu = () => {
+      menuOpen.value = false
+    }
+
+    const toggleMenu = () => {
+      menuOpen.value = !menuOpen.value
+    }
+
+    onMounted(() => {
+      document.addEventListener('click', closeMenu)
+    })
+
+    onBeforeUnmount(() => {
+      document.removeEventListener('click', closeMenu)
+    })
 
     const onCommentAdded = () => {
-      commentCount.value++
       emit('comment-added')
     }
 
@@ -127,16 +150,19 @@ export default {
       }
     }
 
-    return { 
-      showComments, 
-      isLiked, 
-      likeCount, 
+    return {
+      showComments,
+      isLiked,
+      likeCount,
       commentCount,
-      onCommentAdded, 
-      toggleLike, 
-      formatDate, 
-      getPrivacyClass, 
-      getPrivacyIcon 
+      safeComments,
+      menuOpen,
+      toggleMenu,
+      onCommentAdded,
+      toggleLike,
+      formatDate,
+      getPrivacyClass,
+      getPrivacyIcon
     }
   }
 }
@@ -238,6 +264,20 @@ export default {
   border: none;
   border-radius: 0.75rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.post-menu {
+  position: relative;
+}
+
+.post-menu .dropdown-menu {
+  display: block;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 11rem;
+  padding: 0.5rem 0;
+  z-index: 10;
 }
 
 .dropdown-item {

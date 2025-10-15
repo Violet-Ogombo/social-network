@@ -1,22 +1,17 @@
-import axios from 'axios';
+import api from './index';
 
-const apiClient = axios.create({
-  baseURL: 'http://localhost:8080',
-  withCredentials: true,
-});
-
-export const createPost = async (formData) => {
-  const res = await apiClient.post('/api/posts/create', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+export const createPost = async (postData) => {
+  const res = await api.post('/api/posts/create', postData);
   return res.data;
 }
 
 export const listPosts = async (user_id) => {
   const url = user_id ? `/api/posts?user_id=${user_id}` : '/api/posts';
-  const res = await apiClient.get(url);
+  const res = await api.get(url);
   return res.data;
 }
 
-export const addComment = async (post_id, content) => {
-  const res = await apiClient.post('/api/posts/comment', { post_id, content });
+export const addComment = async (post_id, content, image_url) => {
+  const res = await api.post('/api/posts/comment', { post_id, content, image_url });
   return res.data;
 }

@@ -1,123 +1,129 @@
 <template>
   <div class="container py-4">
     <div v-if="profile" class="profile-container">
-      <!-- Profile Header -->
-      <div class="row">
-        <div class="col-12">
-          <div class="card profile-header-card">
-            <div class="profile-cover"></div>
-            <div class="card-body position-relative">
-              <!-- Profile Avatar -->
-              <div class="profile-avatar-container">
-                <div class="profile-avatar">
-                  <img v-if="profile.avatar" :src="profile.avatar" alt="avatar" class="avatar-img" />
-                  <i v-else class="fas fa-user-circle fa-5x text-primary"></i>
-                </div>
-                <div v-if="isMine" class="edit-avatar-btn">
-                  <button class="btn btn-sm btn-outline-primary">
-                    <i class="fas fa-camera"></i>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Profile Info -->
-              <div class="profile-info mt-4">
-                <div class="row align-items-start">
-                  <div class="col-md-8">
-                    <h2 class="profile-name mb-1">{{ profile.nickname || 'Anonymous User' }}</h2>
-                    <h5 class="text-muted mb-2">{{ profile.first_name }} {{ profile.last_name }}</h5>
-                    <p class="profile-about mb-3" v-if="profile.about">{{ profile.about }}</p>
-                    
-                    <!-- Profile Stats -->
-                    <div class="profile-stats d-flex gap-4 mb-3">
-                      <div class="stat-item">
-                        <strong class="d-block text-primary">{{ followers.length }}</strong>
-                        <small class="text-muted">Followers</small>
-                      </div>
-                      <div class="stat-item">
-                        <strong class="d-block text-primary">{{ followingList.length }}</strong>
-                        <small class="text-muted">Following</small>
-                      </div>
-                      <div class="stat-item">
-                        <strong class="d-block text-primary">{{ postCount }}</strong>
-                        <small class="text-muted">Posts</small>
-                      </div>
-                    </div>
-
-                    <!-- Contact Info -->
-                    <div v-if="profile.email && (isMine || profile.profile_type === 'public')" class="contact-info mb-3">
-                      <small class="text-muted">
-                        <i class="fas fa-envelope me-2"></i>
-                        {{ profile.email }}
-                      </small>
-                    </div>
-                  </div>
-
-                  <div class="col-md-4 text-md-end">
-                    <!-- Privacy Settings (Own Profile) -->
-                    <div v-if="isMine" class="privacy-controls mb-3">
-                      <label class="form-label fw-semibold">
-                        <i class="fas fa-shield-alt text-primary me-2"></i>
-                        Profile Privacy
-                      </label>
-                      <select v-model="profile.profile_type" @change="changePrivacy" class="form-select">
-                        <option value="public">
-                          <i class="fas fa-globe"></i> Public
-                        </option>
-                        <option value="private">
-                          <i class="fas fa-lock"></i> Private
-                        </option>
-                      </select>
-                    </div>
-
-                    <!-- Follow Controls (Other Profiles) -->
-                    <div v-else class="follow-controls">
-                      <button 
-                        @click="toggleFollow" 
-                        :class="following ? 'btn btn-outline-danger' : 'btn btn-primary'"
-                        class="btn-lg px-4"
-                      >
-                        <i :class="following ? 'fas fa-user-minus' : 'fas fa-user-plus'"></i>
-                        {{ following ? 'Unfollow' : 'Follow' }}
-                      </button>
-                    </div>
-
-                    <!-- Privacy Badge -->
-                    <div class="privacy-badge">
-                      <span class="badge" :class="profile.profile_type === 'public' ? 'bg-success' : 'bg-warning'">
-                        <i :class="profile.profile_type === 'public' ? 'fas fa-globe' : 'fas fa-lock'"></i>
-                        {{ profile.profile_type }} Profile
-                      </span>
-                    </div>
-                  </div>
-                </div>
+      <!-- Private Profile View -->
+      <div v-if="!profile.is_accessible" class="private-profile-view text-center py-5">
+        <div class="card">
+          <div class="card-body">
+            <div class="profile-avatar-container mb-3">
+              <div class="profile-avatar">
+                <img v-if="profile.avatar" :src="profile.avatar" alt="avatar" class="avatar-img" />
+                <i v-else class="fas fa-user-circle fa-5x text-primary"></i>
               </div>
             </div>
+            <h2 class="profile-name mb-1">{{ profile.nickname || 'User' }}</h2>
+            <span class="badge bg-warning mb-4">
+              <i class="fas fa-lock"></i>
+              {{ profile.profile_type }} Profile
+            </span>
+            <div class="alert alert-warning" role="alert">
+              <h4 class="alert-heading"><i class="fas fa-eye-slash"></i> This Account is Private</h4>
+              <p>Follow this account to see their content.</p>
+            </div>
+            <button 
+              @click="toggleFollow" 
+              :class="following ? 'btn btn-outline-danger' : 'btn btn-primary'"
+              class="btn-lg px-4 mt-3"
+            >
+              <i :class="following ? 'fas fa-user-minus' : 'fas fa-user-plus'"></i>
+              {{ following ? 'Unfollow' : (pending ? 'Request Sent' : 'Follow') }}
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- Profile Content Tabs -->
-      <div class="row mt-4">
-        <div class="col-md-6">
-          <div class="card followers-card">
-            <div class="card-header bg-gradient">
-              <h5 class="mb-0 text-white">
-                <i class="fas fa-users me-2"></i>
-                Followers ({{ followers.length }})
-              </h5>
-            </div>
-            <div class="card-body">
-              <div v-if="followers.length === 0" class="text-center py-3">
-                <i class="fas fa-user-friends fa-2x text-muted mb-2"></i>
-                <p class="text-muted mb-0">No followers yet</p>
-              </div>
-              <div v-else class="followers-list">
-                <div v-for="f in followers" :key="f.id" class="follower-item d-flex align-items-center mb-2">
-                  <i class="fas fa-user-circle fa-2x text-primary me-3"></i>
-                  <div>
-                    <strong class="d-block">{{ f.nickname }}</strong>
-                    <small class="text-muted">{{ f.first_name }} {{ f.last_name }}</small>
+      <!-- Full Profile View -->
+      <div v-else>
+        <!-- Profile Header -->
+        <div class="row">
+          <div class="col-12">
+            <div class="card profile-header-card">
+              <div class="profile-cover"></div>
+              <div class="card-body position-relative">
+                <!-- Profile Avatar -->
+                <div class="profile-avatar-container">
+                  <div class="profile-avatar">
+                    <img v-if="profile.avatar" :src="profile.avatar" alt="avatar" class="avatar-img" />
+                    <i v-else class="fas fa-user-circle fa-5x text-primary"></i>
+                  </div>
+                  <div v-if="isMine" class="edit-avatar-btn">
+                    <button class="btn btn-sm btn-outline-primary">
+                      <i class="fas fa-camera"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Profile Info -->
+                <div class="profile-info mt-4">
+                  <div class="row align-items-start">
+                    <div class="col-md-8">
+                      <h2 class="profile-name mb-1">{{ profile.nickname || 'Anonymous User' }}</h2>
+                      <h5 class="text-muted mb-2">{{ profile.first_name }} {{ profile.last_name }}</h5>
+                      <p class="profile-about mb-3" v-if="profile.about">{{ profile.about }}</p>
+                      
+                      <!-- Profile Stats -->
+                      <div class="profile-stats d-flex gap-4 mb-3">
+                        <div class="stat-item">
+                          <strong class="d-block text-primary">{{ followers.length }}</strong>
+                          <small class="text-muted">Followers</small>
+                        </div>
+                        <div class="stat-item">
+                          <strong class="d-block text-primary">{{ followingList.length }}</strong>
+                          <small class="text-muted">Following</small>
+                        </div>
+                        <div class="stat-item">
+                          <strong class="d-block text-primary">{{ postCount }}</strong>
+                          <small class="text-muted">Posts</small>
+                        </div>
+                      </div>
+
+                      <!-- Contact Info -->
+                      <div v-if="profile.email && isMine" class="contact-info mb-3">
+                        <small class="text-muted">
+                          <i class="fas fa-envelope me-2"></i>
+                          {{ profile.email }}
+                        </small>
+                      </div>
+                    </div>
+
+                    <div class="col-md-4 text-md-end">
+                      <!-- Privacy Settings (Own Profile) -->
+                      <div v-if="isMine" class="privacy-controls mb-3">
+                        <label class="form-label fw-semibold">
+                          <i class="fas fa-shield-alt text-primary me-2"></i>
+                          Profile Privacy
+                        </label>
+                        <select v-model="profile.profile_type" @change="changePrivacy" class="form-select">
+                          <option value="public">
+                            Public
+                          </option>
+                          <option value="private">
+                            Private
+                          </option>
+                        </select>
+                      </div>
+
+                      <!-- Follow Controls (Other Profiles) -->
+                      <div v-else class="follow-controls">
+                        <button 
+                          @click="toggleFollow" 
+                          :class="following ? 'btn btn-outline-danger' : 'btn btn-primary'"
+                          class="btn-lg px-4"
+                          :disabled="pending"
+                        >
+                          <i :class="following ? 'fas fa-user-minus' : 'fas fa-user-plus'"></i>
+                          {{ following ? 'Unfollow' : (pending ? 'Request Sent' : 'Follow') }}
+                        </button>
+                      </div>
+
+                      <!-- Privacy Badge -->
+                      <div class="privacy-badge">
+                        <span class="badge" :class="profile.profile_type === 'public' ? 'bg-success' : 'bg-warning'">
+                          <i :class="profile.profile_type === 'public' ? 'fas fa-globe' : 'fas fa-lock'"></i>
+                          {{ profile.profile_type }} Profile
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -125,27 +131,132 @@
           </div>
         </div>
 
-        <div class="col-md-6">
-          <div class="card following-card">
-            <div class="card-header bg-gradient">
-              <h5 class="mb-0 text-white">
-                <i class="fas fa-heart me-2"></i>
-                Following ({{ followingList.length }})
-              </h5>
-            </div>
-            <div class="card-body">
-              <div v-if="followingList.length === 0" class="text-center py-3">
-                <i class="fas fa-heart fa-2x text-muted mb-2"></i>
-                <p class="text-muted mb-0">Not following anyone yet</p>
+        <!-- Profile Content -->
+        <div class="row mt-4">
+          <!-- Left Sidebar -->
+          <div class="col-lg-4">
+            <div class="sidebar-sticky">
+              <!-- About Card -->
+              <div class="card mb-4">
+                <div class="card-header bg-gradient">
+                  <h5 class="mb-0 text-white"><i class="fas fa-user-circle me-2"></i>About</h5>
+                </div>
+                <div class="card-body">
+                  <ul class="list-unstyled">
+                    <li v-if="profile.first_name" class="mb-2">
+                      <i class="fas fa-user me-2 text-muted"></i>
+                      <strong>Name:</strong> {{ profile.first_name }} {{ profile.last_name }}
+                    </li>
+                    <li v-if="profile.date_of_birth" class="mb-2">
+                      <i class="fas fa-calendar-alt me-2 text-muted"></i>
+                      <strong>Born:</strong> {{ profile.date_of_birth }}
+                    </li>
+                    <li v-if="profile.created_at" class="mb-2">
+                      <i class="fas fa-clock me-2 text-muted"></i>
+                      <strong>Joined:</strong> {{ profile.created_at }}
+                    </li>
+                  </ul>
+                </div>
               </div>
-              <div v-else class="following-list">
-                <div v-for="f in followingList" :key="f.id" class="following-item d-flex align-items-center mb-2">
-                  <i class="fas fa-user-circle fa-2x text-success me-3"></i>
-                  <div>
-                    <strong class="d-block">{{ f.nickname }}</strong>
-                    <small class="text-muted">{{ f.first_name }} {{ f.last_name }}</small>
+
+              <!-- Follow Requests Card (only for own profile) -->
+              <div v-if="isMine" class="card mb-4">
+                <div class="card-header bg-gradient d-flex justify-content-between align-items-center">
+                  <h5 class="mb-0 text-white"><i class="fas fa-user-check me-2"></i>Follow Requests</h5>
+                  <span class="badge bg-light text-primary">{{ followRequests.length }}</span>
+                </div>
+                <div class="card-body">
+                  <div v-if="followRequests.length === 0" class="text-center py-3 text-muted">
+                    No pending requests
+                  </div>
+                  <div v-else class="list-group list-group-flush">
+                    <div v-for="req in followRequests" :key="req.id" class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-3">
+                          <img v-if="req.sender_avatar" :src="req.sender_avatar" alt="avatar" class="rounded-circle" style="width:36px;height:36px;object-fit:cover;" />
+                          <i v-else class="fas fa-user-circle fa-2x text-primary"></i>
+                          <div>
+                            <strong>{{ req.sender_nickname || ('User #' + req.sender_id) }}</strong>
+                            <div class="text-muted small">Requested {{ req.created_at || 'recently' }}</div>
+                          </div>
+                        </div>
+                        <div class="btn-group">
+                          <button class="btn btn-sm btn-success" @click="handleAccept(req.sender_id)">
+                            <i class="fas fa-check"></i>
+                          </button>
+                          <button class="btn btn-sm btn-outline-danger" @click="handleDecline(req.sender_id)">
+                            <i class="fas fa-times"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <!-- Followers Card -->
+              <div class="card mb-4">
+                <div class="card-header bg-gradient">
+                  <h5 class="mb-0 text-white">
+                    <i class="fas fa-users me-2"></i>
+                    Followers ({{ followers.length }})
+                  </h5>
+                </div>
+                <div class="card-body">
+                  <div v-if="followers.length === 0" class="text-center py-3">
+                    <p class="text-muted mb-0">No followers yet</p>
+                  </div>
+                  <div v-else class="list-group list-group-flush">
+                    <div v-for="f in followers" :key="f.id" class="list-group-item d-flex align-items-center">
+                      <i class="fas fa-user-circle fa-2x text-primary me-3"></i>
+                      <span>{{ f.nickname }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Following Card -->
+              <div class="card">
+                <div class="card-header bg-gradient">
+                  <h5 class="mb-0 text-white">
+                    <i class="fas fa-heart me-2"></i>
+                    Following ({{ followingList.length }})
+                  </h5>
+                </div>
+                <div class="card-body">
+                  <div v-if="followingList.length === 0" class="text-center py-3">
+                    <p class="text-muted mb-0">Not following anyone yet</p>
+                  </div>
+                  <div v-else class="list-group list-group-flush">
+                    <div v-for="f in followingList" :key="f.id" class="list-group-item d-flex align-items-center">
+                      <i class="fas fa-user-circle fa-2x text-success me-3"></i>
+                      <span>{{ f.nickname }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Content: Posts -->
+          <div class="col-lg-8">
+            <!-- Create Post (if my profile) -->
+            <div v-if="isMine" class="mb-4">
+              <CreatePost @post-created="load" />
+            </div>
+            
+            <!-- User's Posts -->
+            <div class="posts-feed">
+              <h4 class="mb-3">Posts</h4>
+              <div v-if="posts.length === 0" class="card text-center py-5">
+                <div class="card-body">
+                  <i class="fas fa-newspaper fa-3x text-muted mb-3"></i>
+                  <h5 class="text-muted">No Posts Yet</h5>
+                  <p class="text-muted">This user hasn't posted anything.</p>
+                </div>
+              </div>
+              <div v-for="p in posts" :key="p.id" class="mb-4">
+                <PostCard :post="p" @comment-added="load" />
               </div>
             </div>
           </div>
@@ -164,49 +275,142 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import * as api from '@/api/users'
-import { follow, unfollow } from '@/api/users'
+import { listPosts } from '@/api/post'
 import { useAuthStore } from '@/store/auth'
+import PostCard from '@/components/PostCard.vue'
+import CreatePost from '@/components/CreatePost.vue'
 
 export default {
+  components: { PostCard, CreatePost },
   setup() {
     const auth = useAuthStore()
+    const route = useRoute()
+    
     const profile = ref(null)
     const followers = ref([])
     const followingList = ref([])
+  const posts = ref([])
+  const followRequests = ref([])
     const following = ref(false)
-    const postCount = ref(Math.floor(Math.random() * 100)) // Mock data
+    const pending = ref(false) // To track pending follow requests
 
+    const userId = computed(() => route.params.id || auth.user?.user_id)
     const isMine = computed(() => auth.user && profile.value && String(auth.user.user_id) === String(profile.value.id))
+    const postCount = computed(() => posts.value.length)
 
     const load = async () => {
-      // load own profile by default
-      profile.value = await api.getProfile()
-      followers.value = await api.getFollowers()
-      followingList.value = await api.getFollowing()
+      if (!userId.value) return
+      
+      try {
+        profile.value = await api.getProfile(userId.value)
+
+        // If profile is not accessible, we only need to check follow status
+        if (!profile.value.is_accessible) {
+          if (auth.user && !isMine.value) {
+            const status = await api.getFollowStatus(profile.value.id)
+            following.value = !!status.following
+            pending.value = !!status.request_pending
+          }
+          return
+        }
+
+        // If accessible, load all data
+        followers.value = await api.getFollowers(userId.value)
+        followingList.value = await api.getFollowing(userId.value)
+        posts.value = await listPosts(userId.value)
+        if (isMine.value) {
+          await refreshRequests()
+        } else {
+          followRequests.value = []
+        }
+
+        // Check if the logged-in user is following this profile
+        if (auth.user) {
+          if (isMine.value) {
+            following.value = false
+            pending.value = false
+          } else {
+            const status = await api.getFollowStatus(profile.value.id)
+            following.value = !!status.following
+            pending.value = !!status.request_pending
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load profile data:", error)
+        profile.value = { is_accessible: false, nickname: 'Error', avatar: null, profile_type: 'private' } // Show private view on error
+      }
     }
 
     const changePrivacy = async () => {
       if (!isMine.value) return
-      await api.setPrivacy(profile.value.profile_type)
+      try {
+        await api.setPrivacy(profile.value.profile_type)
+      } catch (error) {
+        console.error("Failed to change privacy:", error)
+      }
     }
 
     const toggleFollow = async () => {
-      if (!profile.value) return
-      if (following.value) {
-        await unfollow(profile.value.id)
-        following.value = false
-      } else {
-        await follow(profile.value.id)
-        following.value = true
+      if (!profile.value || isMine.value) return
+      try {
+        if (following.value) {
+          await api.unfollow(profile.value.id)
+        } else {
+          await api.follow(profile.value.id)
+        }
+
+        if (profile.value.is_accessible) {
+          followers.value = await api.getFollowers(userId.value)
+          if (isMine.value) {
+            followRequests.value = await api.listFollowRequests()
+          }
+        }
+
+        if (auth.user) {
+          const status = await api.getFollowStatus(profile.value.id)
+          following.value = !!status.following
+          pending.value = !!status.request_pending
+        }
+      } catch (error) {
+        console.error("Follow/unfollow error:", error)
       }
-      followers.value = await api.getFollowers(profile.value.id)
     }
 
-    onMounted(load)
+    const refreshRequests = async () => {
+      if (isMine.value) {
+        try {
+          followRequests.value = await api.listFollowRequests()
+        } catch (error) {
+          followRequests.value = []
+        }
+      }
+    }
 
-    return { profile, followers, followingList, following, postCount, isMine, changePrivacy, toggleFollow }
+    const handleAccept = async (senderId) => {
+      try {
+        await api.acceptFollowRequest(senderId)
+        await refreshRequests()
+        followers.value = await api.getFollowers(userId.value)
+      } catch (error) {
+        console.error('Failed to accept follow request', error)
+      }
+    }
+
+    const handleDecline = async (senderId) => {
+      try {
+        await api.declineFollowRequest(senderId)
+        await refreshRequests()
+      } catch (error) {
+        console.error('Failed to decline follow request', error)
+      }
+    }
+
+    watch(userId, load, { immediate: true })
+
+    return { profile, followers, followingList, followRequests, posts, following, pending, postCount, isMine, load, changePrivacy, toggleFollow, handleAccept, handleDecline }
   }
 }
 </script>
@@ -230,31 +434,18 @@ export default {
   position: relative;
 }
 
-.profile-avatar-container {
-  position: absolute;
-  top: -60px;
-  left: 30px;
-}
-
-.profile-avatar {
-  position: relative;
-  width: 120px;
-  height: 120px;
+.avatar-img {
+  width: 128px;
+  height: 128px;
   border-radius: 50%;
   border: 4px solid white;
-  overflow: hidden;
-  background: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  object-fit: cover;
 }
 
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
+.profile-avatar-container {
+  position: relative;
+  margin-top: -75px;
+  display: inline-block;
 }
 
 .edit-avatar-btn {
@@ -263,102 +454,7 @@ export default {
   right: 5px;
 }
 
-.profile-info {
-  margin-left: 150px;
-}
-
-.profile-name {
-  color: #2d3748;
-  font-weight: 700;
-  font-size: 1.75rem;
-}
-
-.profile-about {
-  color: #4a5568;
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-.profile-stats {
-  padding: 1rem 0;
-  border-top: 1px solid #e2e8f0;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.privacy-controls .form-select {
-  max-width: 200px;
-  border-radius: 0.75rem;
-}
-
-.follow-controls .btn {
-  border-radius: 0.75rem;
-  font-weight: 600;
-  transition: all 0.3s ease;
-}
-
-.follow-controls .btn:hover {
-  transform: translateY(-2px);
-}
-
-.privacy-badge {
-  margin-top: 1rem;
-}
-
-.privacy-badge .badge {
-  font-size: 0.8rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-}
-
-.card {
-  border: none;
-  border-radius: 1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s ease;
-}
-
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
-}
-
-.card-header.bg-gradient {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  border: none;
-}
-
-.follower-item, .following-item {
-  padding: 0.75rem;
-  border-radius: 0.75rem;
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-
-.follower-item:hover, .following-item:hover {
-  background-color: #f8f9fa;
-  transform: translateX(4px);
-}
-
-.contact-info {
-  padding: 0.75rem;
-  background-color: #f8f9fa;
-  border-radius: 0.5rem;
-  display: inline-block;
-}
-
-@media (max-width: 768px) {
-  .profile-info {
-    margin-left: 0;
-    margin-top: 70px;
-  }
-  
-  .profile-avatar-container {
-    left: 50%;
-    transform: translateX(-50%);
-  }
+.private-profile-view .profile-avatar-container {
+  margin-top: 0;
 }
 </style>
