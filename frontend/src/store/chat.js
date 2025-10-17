@@ -291,6 +291,30 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
+		async loadMoreHistory(contactId) {
+			if (!contactId) return 0
+			const key = String(contactId)
+			const conv = this.ensureConversation(key)
+			const offset = conv.length
+			try {
+				const { data } = await fetchHistory(key, offset)
+				if (!Array.isArray(data) || data.length === 0) return 0
+				const me = this.getCurrentUserId()
+				const items = data.map((m) => ({
+					id: m.id,
+					content: m.content,
+					outgoing: String(m.sender_id) === me,
+					senderName: m.sender_name || '',
+					timestamp: m.created_at || new Date().toISOString(),
+				}))
+				this.conversations[key] = items.concat(this.conversations[key] || [])
+				return items.length
+			} catch (err) {
+				console.error('Failed to load more history', err)
+				return 0
+			}
+		},
+
 		incrementUnread(id) {
 			const contact = this.contacts.find((c) => c.id === String(id))
 			if (contact) contact.unread += 1

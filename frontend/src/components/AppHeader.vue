@@ -81,7 +81,7 @@
 					<!-- User Profile -->
 					<div class="dropdown">
 						<button class="btn btn-outline-light dropdown-toggle d-flex align-items-center" 
-								@click="profileOpen = !profileOpen" aria-expanded="false">
+							@click="profileOpen = !profileOpen" aria-expanded="false">
 							<img v-if="user.avatar" :src="user.avatar" alt="avatar" 
 								 class="rounded-circle me-2" style="width: 24px; height: 24px;" />
 							<i v-else class="fas fa-user-circle me-2"></i>
@@ -100,6 +100,11 @@
 							</button></li>
 						</ul>
 					</div>
+
+					<!-- Logout quick button visible on all pages -->
+					<button class="btn btn-outline-light ms-2" @click="onLogout" title="Logout">
+						<i class="fas fa-sign-out-alt"></i>
+					</button>
 				</div>
 
 				<div class="d-flex" v-else>

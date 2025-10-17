@@ -135,6 +135,7 @@ export default {
 		const draft = ref('')
 		const errorBanner = ref('')
 		const messagePane = ref(null)
+		let loadingMore = false
 
 		const connected = computed(() => chat.connected)
 		const activeConversation = computed(() => chat.activeConversation)
@@ -206,9 +207,33 @@ export default {
 			{ deep: true }
 		)
 
+		const onScroll = async (e) => {
+			const el = e.target
+			if (!el) return
+			if (el.scrollTop <= 40 && !loadingMore) {
+				loadingMore = true
+				const prevHeight = el.scrollHeight
+				const added = await chat.loadMoreHistory(activeContactId.value)
+				await nextTick()
+				if (added > 0) {
+					// preserve scroll position so content doesn't jump
+					const newHeight = el.scrollHeight
+					el.scrollTop = newHeight - prevHeight + el.scrollTop
+				}
+				loadingMore = false
+			}
+		}
+
 		onMounted(() => {
 			if (!chat.connected) {
 				chat.connect()
+			}
+		})
+
+		// attach scroll listener
+		onMounted(() => {
+			if (messagePane.value) {
+				messagePane.value.addEventListener('scroll', onScroll)
 			}
 		})
 
@@ -229,6 +254,7 @@ export default {
 			selectContact,
 			send,
 			formatTimestamp,
+			onScroll,
 		}
 	},
 }
@@ -240,7 +266,7 @@ export default {
 }
 
 .chat-card {
-	min-height: 520px;
+	height: 640px;
 }
 
 .contacts-panel {
@@ -320,6 +346,7 @@ export default {
 	padding: 24px;
 	background: linear-gradient(180deg, #f7f8ff 0%, #ffffff 100%);
 	overflow-y: auto;
+	height: calc(640px - 140px); /* account for header/footer sizes */
 }
 
 .message-row {
