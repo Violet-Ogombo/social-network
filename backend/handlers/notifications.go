@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"social-network/backend/bus"
 	"social-network/backend/db"
 	"social-network/backend/models"
 	"social-network/backend/utils"
@@ -13,6 +15,30 @@ import (
 func CreateNotification(recipientID int64, actorID int64, ntype string, data string) error {
 	_, err := db.DB.Exec("INSERT INTO notifications (recipient_id, actor_id, type, data, is_read, created_at) VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)", recipientID, actorID, ntype, data)
 	return err
+}
+
+// Notify builds a consistent JSON payload, persists the notification, and
+// publishes a realtime copy to the in-memory bus so connected websocket
+// clients receive it.
+func Notify(recipientID int64, actorID int64, ntype string, payload map[string]interface{}) error {
+	// ensure payload is JSON string
+	dataBytes, _ := json.Marshal(payload)
+	dataStr := string(dataBytes)
+
+	if err := CreateNotification(recipientID, actorID, ntype, dataStr); err != nil {
+		log.Println("CreateNotification error:", err)
+		// still try to publish realtime for a best-effort UX
+	}
+
+	// publish to bus for realtime delivery (best-effort)
+	notif := map[string]interface{}{
+		"type": ntype,
+		"data": payload,
+	}
+	realtimeBytes, _ := json.Marshal(notif)
+	bus.PublishNotification(recipientID, realtimeBytes)
+	log.Printf("Published realtime notification type=%s to recipient=%d", ntype, recipientID)
+	return nil
 }
 
 // GET /api/notifications - list recent notifications for current user

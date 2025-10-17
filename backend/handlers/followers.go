@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"social-network/backend/db"
 	"social-network/backend/utils"
@@ -47,7 +48,7 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// create notification for the target user about the new follower
-		_ = CreateNotification(payload.TargetID, userID, "new_follower", "")
+		_ = Notify(payload.TargetID, userID, "new_follower", map[string]interface{}{"follower_id": userID, "url": fmt.Sprintf("/profile/%d", userID)})
 		utils.JSON(w, http.StatusOK, map[string]string{"status": "followed"})
 		return
 	}
@@ -58,7 +59,7 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// notify target about follow request
-	_ = CreateNotification(payload.TargetID, userID, "follow_request", "")
+	_ = Notify(payload.TargetID, userID, "follow_request", map[string]interface{}{"requester_id": userID, "url": fmt.Sprintf("/profile/%d/requests", userID)})
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "requested"})
 }
 
@@ -98,7 +99,7 @@ func AcceptFollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// notify sender their request was accepted
-	_ = CreateNotification(payload.SenderID, userID, "follow_request_accepted", "")
+	_ = Notify(payload.SenderID, userID, "follow_request_accepted", map[string]interface{}{"follower_id": userID, "url": fmt.Sprintf("/profile/%d", userID)})
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "accepted"})
 }
 
@@ -131,7 +132,7 @@ func DeclineFollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// notify sender their request was declined
-	_ = CreateNotification(payload.SenderID, userID, "follow_request_declined", "")
+	_ = Notify(payload.SenderID, userID, "follow_request_declined", map[string]interface{}{"follower_id": userID, "url": fmt.Sprintf("/profile/%d", userID)})
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "declined"})
 }
 

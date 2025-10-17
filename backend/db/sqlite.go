@@ -37,7 +37,10 @@ func InitDB() {
 	}
 	log.Printf("Opening SQLite DB at %s", absPath)
 
-	DB, err = sql.Open("sqlite3", absPath)
+	// Enable WAL journal mode and a busy timeout to reduce lock contention.
+	// The DSN parameters are appended to the file path.
+	dsn := absPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	DB, err = sql.Open("sqlite3", dsn)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to connect to DB: %v", err))
 	}

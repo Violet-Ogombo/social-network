@@ -114,11 +114,31 @@ func InviteHandler(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusBadRequest, "Invalid input")
 		return
 	}
-	_, err := db.DB.Exec("INSERT INTO group_invites (group_id, inviter_id, invitee_id) VALUES (?, ?, ?)", payload.GroupID, inviter, payload.InviteeID)
+	// only group owner can invite
+	var ownerID int64
+	if err := db.DB.QueryRow("SELECT owner_id FROM groups WHERE id = ?", payload.GroupID).Scan(&ownerID); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid group")
+		return
+	}
+	if ownerID != inviter {
+		utils.Error(w, http.StatusForbidden, "Only group owner can invite")
+		return
+	}
+	// deduplicate pending invites
+	var cnt int
+	db.DB.QueryRow("SELECT COUNT(1) FROM group_invites WHERE group_id=? AND invitee_id=? AND status='pending'", payload.GroupID, payload.InviteeID).Scan(&cnt)
+	if cnt > 0 {
+		utils.JSON(w, http.StatusOK, map[string]string{"status": "already_pending"})
+		return
+	}
+	res, err := db.DB.Exec("INSERT INTO group_invites (group_id, inviter_id, invitee_id) VALUES (?, ?, ?)", payload.GroupID, inviter, payload.InviteeID)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to invite")
 		return
 	}
+	id, _ := res.LastInsertId()
+	// notify the invitee about the invite
+	_ = Notify(payload.InviteeID, inviter, "group_invite", map[string]interface{}{"invite_id": id, "group_id": payload.GroupID, "url": fmt.Sprintf("/groups/%d", payload.GroupID)})
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "invited"})
 }
 
@@ -141,8 +161,9 @@ func RespondInviteHandler(w http.ResponseWriter, r *http.Request) {
 	var invite struct {
 		GroupID   int64
 		InviteeID int64
+		InviterID int64
 	}
-	err := db.DB.QueryRow("SELECT group_id, invitee_id FROM group_invites WHERE id = ? AND status = 'pending'", payload.InviteID).Scan(&invite.GroupID, &invite.InviteeID)
+	err := db.DB.QueryRow("SELECT group_id, invitee_id, inviter_id FROM group_invites WHERE id = ? AND status = 'pending'", payload.InviteID).Scan(&invite.GroupID, &invite.InviteeID, &invite.InviterID)
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "Invalid invite")
 		return
@@ -154,10 +175,14 @@ func RespondInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if payload.Action == "accept" {
 		db.DB.Exec("UPDATE group_invites SET status='accepted' WHERE id=?", payload.InviteID)
 		db.DB.Exec("INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)", invite.GroupID, userID)
+		// notify inviter that invite was accepted
+		_ = Notify(invite.InviterID, userID, "group_invite_response", map[string]interface{}{"invite_id": payload.InviteID, "status": "accepted", "group_id": invite.GroupID, "url": fmt.Sprintf("/groups/%d", invite.GroupID)})
 		utils.JSON(w, http.StatusOK, map[string]string{"status": "accepted"})
 		return
 	}
 	db.DB.Exec("UPDATE group_invites SET status='declined' WHERE id=?", payload.InviteID)
+	// notify inviter that invite was declined
+	_ = Notify(invite.InviterID, userID, "group_invite_response", map[string]interface{}{"invite_id": payload.InviteID, "status": "declined", "group_id": invite.GroupID, "url": fmt.Sprintf("/groups/%d", invite.GroupID)})
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "declined"})
 }
 
@@ -298,6 +323,20 @@ func CreateEventHandler(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Failed to create event")
 		return
 	}
+
+	// notify group members about the new event (persist notifications)
+	rows, err := db.DB.Query("SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?", payload.GroupID, userID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var mid int64
+			if err := rows.Scan(&mid); err == nil {
+				// create a simple JSON payload with event info
+				data := map[string]interface{}{"group_id": payload.GroupID, "title": payload.Title, "event_time": payload.EventTime, "url": fmt.Sprintf("/groups/%d", payload.GroupID)}
+				_ = Notify(mid, userID, "group_event", data)
+			}
+		}
+	}
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "created"})
 }
 
@@ -320,4 +359,245 @@ func VoteEventHandler(w http.ResponseWriter, r *http.Request) {
 	// upsert vote
 	db.DB.Exec("INSERT OR REPLACE INTO event_votes (id, event_id, user_id, vote) VALUES ((SELECT id FROM event_votes WHERE event_id=? AND user_id=?), ?, ?, ?)", payload.EventID, userID, payload.EventID, userID, payload.Vote)
 	utils.JSON(w, http.StatusOK, map[string]string{"status": "voted"})
+}
+
+// ListEventsHandler - GET /api/group/events?group_id=<id>
+// Returns events for a group including aggregated vote counts and current user's vote
+func ListEventsHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	gidStr := r.URL.Query().Get("group_id")
+	if gidStr == "" {
+		utils.Error(w, http.StatusBadRequest, "Missing group_id")
+		return
+	}
+	gid, err := strconv.ParseInt(gidStr, 10, 64)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid group_id")
+		return
+	}
+	// ensure user is a member of the group
+	var cnt int
+	db.DB.QueryRow("SELECT COUNT(1) FROM group_members WHERE group_id=? AND user_id=?", gid, userID).Scan(&cnt)
+	if cnt == 0 {
+		utils.Error(w, http.StatusForbidden, "Not a member")
+		return
+	}
+
+	rows, err := db.DB.Query("SELECT id, group_id, creator_id, title, description, event_time, created_at FROM events WHERE group_id = ? ORDER BY created_at DESC", gid)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Failed to query events")
+		return
+	}
+	defer rows.Close()
+
+	var out []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var groupID int64
+		var creatorID int64
+		var title string
+		var description sql.NullString
+		var eventTime sql.NullString
+		var created string
+		rows.Scan(&id, &groupID, &creatorID, &title, &description, &eventTime, &created)
+
+		// aggregate votes
+		voteRows, _ := db.DB.Query("SELECT vote, COUNT(1) FROM event_votes WHERE event_id = ? GROUP BY vote", id)
+		votes := map[string]int{}
+		for voteRows.Next() {
+			var v string
+			var c int
+			voteRows.Scan(&v, &c)
+			votes[v] = c
+		}
+		voteRows.Close()
+
+		// current user's vote
+		var myVote sql.NullString
+		db.DB.QueryRow("SELECT vote FROM event_votes WHERE event_id=? AND user_id=?", id, userID).Scan(&myVote)
+
+		out = append(out, map[string]interface{}{"id": id, "group_id": groupID, "creator_id": creatorID, "title": title, "description": description.String, "event_time": eventTime.String, "created_at": created, "votes": votes, "my_vote": myVote.String})
+	}
+	utils.JSON(w, http.StatusOK, out)
+}
+
+// CheckMembershipHandler - GET /api/group/membership?group_id=<id>
+func CheckMembershipHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	gidStr := r.URL.Query().Get("group_id")
+	if gidStr == "" {
+		utils.Error(w, http.StatusBadRequest, "Missing group_id")
+		return
+	}
+	gid, err := strconv.ParseInt(gidStr, 10, 64)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid group_id")
+		return
+	}
+	var cnt int
+	db.DB.QueryRow("SELECT COUNT(1) FROM group_members WHERE group_id=? AND user_id=?", gid, userID).Scan(&cnt)
+	utils.JSON(w, http.StatusOK, map[string]bool{"is_member": cnt > 0})
+}
+
+// RequestToJoinHandler - POST { group_id }
+func RequestToJoinHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	var payload struct {
+		GroupID int64 `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid input")
+		return
+	}
+	// ensure group exists
+	var ownerID int64
+	err := db.DB.QueryRow("SELECT owner_id FROM groups WHERE id = ?", payload.GroupID).Scan(&ownerID)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid group")
+		return
+	}
+	// ensure not already a member
+	var cnt int
+	db.DB.QueryRow("SELECT COUNT(1) FROM group_members WHERE group_id=? AND user_id=?", payload.GroupID, userID).Scan(&cnt)
+	if cnt > 0 {
+		utils.Error(w, http.StatusBadRequest, "Already a member")
+		return
+	}
+	// insert request (unique constraint prevents duplicates)
+	_, err = db.DB.Exec("INSERT OR IGNORE INTO group_requests (group_id, requester_id) VALUES (?,?)", payload.GroupID, userID)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Failed to request to join")
+		return
+	}
+	// notify owner
+	_ = Notify(ownerID, userID, "group_join_request", map[string]interface{}{"group_id": payload.GroupID, "requester_id": userID, "url": fmt.Sprintf("/groups/%d/requests", payload.GroupID)})
+	utils.JSON(w, http.StatusOK, map[string]string{"status": "requested"})
+}
+
+// RespondRequestHandler - POST { request_id, action: accept|decline }
+func RespondRequestHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	var payload struct {
+		RequestID int64  `json:"request_id"`
+		Action    string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid input")
+		return
+	}
+	var req struct {
+		GroupID     int64
+		RequesterID int64
+	}
+	err := db.DB.QueryRow("SELECT group_id, requester_id FROM group_requests WHERE id = ? AND status = 'pending'", payload.RequestID).Scan(&req.GroupID, &req.RequesterID)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	// ensure current user is the owner of the group
+	var ownerID int64
+	err = db.DB.QueryRow("SELECT owner_id FROM groups WHERE id = ?", req.GroupID).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		utils.Error(w, http.StatusForbidden, "Not allowed")
+		return
+	}
+	if payload.Action == "accept" {
+		db.DB.Exec("UPDATE group_requests SET status='accepted' WHERE id=?", payload.RequestID)
+		db.DB.Exec("INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?,?)", req.GroupID, req.RequesterID)
+		_ = Notify(req.RequesterID, userID, "group_join_response", map[string]interface{}{"request_id": payload.RequestID, "status": "accepted", "group_id": req.GroupID, "url": fmt.Sprintf("/groups/%d", req.GroupID)})
+		utils.JSON(w, http.StatusOK, map[string]string{"status": "accepted"})
+		return
+	}
+	db.DB.Exec("UPDATE group_requests SET status='declined' WHERE id=?", payload.RequestID)
+	_ = Notify(req.RequesterID, userID, "group_join_response", map[string]interface{}{"request_id": payload.RequestID, "status": "declined", "group_id": req.GroupID, "url": fmt.Sprintf("/groups/%d", req.GroupID)})
+	utils.JSON(w, http.StatusOK, map[string]string{"status": "declined"})
+}
+
+// ListRequestsHandler - GET /api/group/requests?group_id=<id> (owner only)
+func ListRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	gidStr := r.URL.Query().Get("group_id")
+	if gidStr == "" {
+		utils.Error(w, http.StatusBadRequest, "Missing group_id")
+		return
+	}
+	gid, _ := strconv.ParseInt(gidStr, 10, 64)
+	// ensure current user is owner
+	var ownerID int64
+	err := db.DB.QueryRow("SELECT owner_id FROM groups WHERE id = ?", gid).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		utils.Error(w, http.StatusForbidden, "Not allowed")
+		return
+	}
+	rows, err := db.DB.Query(`SELECT gr.id, gr.requester_id, u.nickname, u.avatar, gr.status, gr.created_at
+		FROM group_requests gr
+		JOIN users u ON gr.requester_id = u.id
+		WHERE gr.group_id = ?
+		ORDER BY gr.created_at DESC`, gid)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Failed to query requests")
+		return
+	}
+	defer rows.Close()
+	var out []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var requester int64
+		var nickname sql.NullString
+		var avatar sql.NullString
+		var status string
+		var created string
+		rows.Scan(&id, &requester, &nickname, &avatar, &status, &created)
+		out = append(out, map[string]interface{}{"id": id, "requester_id": requester, "nickname": nickname.String, "avatar": avatar.String, "status": status, "created_at": created})
+	}
+	utils.JSON(w, http.StatusOK, out)
+}
+
+// GetRequestStatusHandler - GET /api/group/request/status?group_id=<id>
+// returns { has_pending: true|false }
+func GetRequestStatusHandler(w http.ResponseWriter, r *http.Request) {
+	uid := utils.GetUserIDFromContext(r)
+	if uid == "" {
+		utils.Error(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID, _ := strconv.ParseInt(uid, 10, 64)
+	gidStr := r.URL.Query().Get("group_id")
+	if gidStr == "" {
+		utils.Error(w, http.StatusBadRequest, "Missing group_id")
+		return
+	}
+	gid, err := strconv.ParseInt(gidStr, 10, 64)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "Invalid group_id")
+		return
+	}
+	var cnt int
+	db.DB.QueryRow("SELECT COUNT(1) FROM group_requests WHERE group_id=? AND requester_id=? AND status='pending'", gid, userID).Scan(&cnt)
+	utils.JSON(w, http.StatusOK, map[string]bool{"has_pending": cnt > 0})
 }

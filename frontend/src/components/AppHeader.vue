@@ -40,14 +40,14 @@
 
 				<div class="d-flex align-items-center" v-if="user">
 					<!-- Notifications -->
-					<div class="dropdown me-3">
-						<button class="btn btn-outline-light position-relative" @click="toggleOpen">
+					<div class="dropdown me-3" :class="{ show: open }">
+						<button class="btn btn-outline-light position-relative" @click="toggleOpen" :aria-expanded="open">
 							<i class="fas fa-bell"></i>
 							<span v-if="unreadCount" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
 								{{ unreadCount }}
 							</span>
 						</button>
-						<div class="dropdown-menu dropdown-menu-end p-0" style="width: 320px;" v-show="open">
+						<div class="dropdown-menu dropdown-menu-end p-0" :class="{ show: open }" style="width: 320px;">
 							<div class="dropdown-header bg-light">
 								<strong>Notifications</strong>
 							</div>
@@ -57,15 +57,20 @@
 							<div v-else>
 								<div v-for="n in notifications" :key="n.id" 
 									 class="dropdown-item border-bottom" 
-									 :class="{ 'bg-light': !n.is_read }">
+									 :class="{ 'bg-light': !n.is_read }"
+									 @click.prevent="openNotification(n)">
 									<div class="d-flex justify-content-between align-items-start">
 										<span class="fw-semibold text-primary">{{ n.type }}</span>
-										<small class="text-muted">{{ n.created_at }}</small>
+										<small class="text-muted">{{ formatTime(n.created_at) }}</small>
 									</div>
-									<div v-if="n.data" class="small text-muted mt-1">{{ n.data }}</div>
+									<div class="small text-muted mt-1">{{ (parseData(n) && parseData(n).preview) ? parseData(n).preview : '' }}</div>
+									<div v-if="n.type === 'group_invite'" class="mt-2">
+										<button class="btn btn-sm btn-success me-2" @click.stop.prevent="(() => { const d = parseData(n); if (d) respondToInvite(d.invite_id, 'accept', d.group_id) })()">Accept</button>
+										<button class="btn btn-sm btn-outline-secondary" @click.stop.prevent="(() => { const d = parseData(n); if (d) respondToInvite(d.invite_id, 'decline', d.group_id) })()">Decline</button>
+									</div>
 									<button v-if="!n.is_read" 
-											@click.prevent="markRead(n.id)" 
-											class="btn btn-sm btn-outline-primary mt-2">
+										@click.stop.prevent="markRead(n.id)" 
+										class="btn btn-sm btn-outline-primary mt-2">
 										Mark read
 									</button>
 								</div>
@@ -85,7 +90,7 @@
 							<img v-if="user.avatar" :src="user.avatar" alt="avatar" 
 								 class="rounded-circle me-2" style="width: 24px; height: 24px;" />
 							<i v-else class="fas fa-user-circle me-2"></i>
-							{{ user.nickname || user.user_id || 'You' }}
+							{{ user.nickname || user.user_id || "You"}}
 						</button>
 						<ul class="dropdown-menu dropdown-menu-end" v-show="profileOpen">
 							<li><router-link class="dropdown-item" to="/profile">
@@ -125,6 +130,7 @@ import { defineComponent, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notification'
+import { respondInvite } from '@/api/groups'
 
 export default defineComponent({
 	setup() {
@@ -133,6 +139,9 @@ export default defineComponent({
 
 		const { user } = storeToRefs(auth)
 		const { list: notifications } = storeToRefs(notif)
+
+		// debug: log the actual user value (storeToRefs returns a ref)
+		console.log("user is:", user.value)
 		
 		const unreadCount = computed(() => (notifications.value || []).filter(n => !n.is_read).length)
 
@@ -152,12 +161,45 @@ export default defineComponent({
 			await notif.markRead(id)
 		}
 
+		const respondToInvite = async (inviteId, action, groupId) => {
+			try {
+				await respondInvite({ invite_id: inviteId, action })
+				await notif.fetch()
+				// let other parts of the app know an invite was handled so they can refresh
+				try { window.dispatchEvent(new CustomEvent('group-invite-responded', { detail: { invite_id: inviteId, action, group_id: groupId } })) } catch(e) {}
+			} catch (e) {
+				console.error('Failed to respond to invite', e)
+			}
+		}
+
 		const onLogout = async () => {
 			await auth.logout()
 			location.href = '/'
 		}
 
-	return { user, notifications, unreadCount, open, toggleOpen, markAll, markRead, onLogout, profileOpen }
+		const parseData = (n) => {
+			if (!n || !n.data) return null
+			try { return JSON.parse(n.data) } catch (e) { return null }
+		}
+
+		const formatTime = (ts) => {
+			if (!ts) return ''
+			const d = new Date(ts)
+			if (isNaN(d.getTime())) return ts
+			return d.toLocaleString()
+		}
+
+		const openNotification = (n) => {
+			const d = parseData(n)
+			let url = '/'
+			if (d && d.url) url = d.url
+			markRead(n.id).then(() => {
+				toggleOpen()
+				window.location.href = url
+			})
+		}
+
+		return { user, notifications, unreadCount, open, toggleOpen, markAll, markRead, onLogout, profileOpen, respondToInvite, parseData, formatTime, openNotification }
 	}
 })
 </script>
@@ -197,6 +239,27 @@ export default defineComponent({
 
 .badge {
   font-size: 0.6rem;
+}
+
+/* Notifications: ensure long text wraps and dropdown scrolls instead of overlapping */
+.dropdown-menu {
+	max-height: 60vh;
+	overflow-y: auto;
+}
+.dropdown-item {
+	white-space: normal !important;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+.dropdown-item .fw-semibold {
+	display: block;
+	margin-bottom: 0.25rem;
+}
+.dropdown-item .small {
+	display: block;
+}
+.dropdown-footer {
+	background: #fff;
 }
 </style>
 

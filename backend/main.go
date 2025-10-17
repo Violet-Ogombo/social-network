@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"time"
 
+	"social-network/backend/bus"
 	"social-network/backend/db"
 	"social-network/backend/handlers"
 	"social-network/backend/utils"
+	"strconv"
 
 	"github.com/rs/cors"
 )
@@ -35,6 +37,17 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			handlers.CleanupSessions()
+		}
+	}()
+
+	// Start bus forwarder: listen for notification messages and send to WS clients
+	go func() {
+		for nm := range bus.NotificationChan {
+			// if connected, push payload
+			sid := strconv.FormatInt(nm.RecipientID, 10)
+			if client, ok := clients[sid]; ok {
+				client.Send <- nm.Payload
+			}
 		}
 	}()
 

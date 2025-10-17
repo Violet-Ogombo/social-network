@@ -76,6 +76,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	clients[userID] = client
 	clientsMutex.Unlock()
 
+	fmt.Println("User connected:", userID, "Nickname:", nickname)
+
 	_, err = db.DB.Exec("UPDATE users SET online_status = 1 WHERE id = ?", userID)
 	if err != nil {
 		log.Println("Error updating user status:", err)
@@ -192,8 +194,12 @@ func (c *Client) readPump() {
 				notifPayload, _ := json.Marshal(notification)
 				receiverClient.Send <- notifPayload
 			}
-			// persist notification
-			_ = handlers.CreateNotification(receiverIDInt, senderIDInt, "new_message", raw.Content)
+			// persist & publish structured notification (store preview only)
+			preview := raw.Content
+			if len(preview) > 140 {
+				preview = preview[:140]
+			}
+			_ = handlers.Notify(receiverIDInt, senderIDInt, "new_message", map[string]interface{}{"message_id": msgID, "conversation_id": receiverIDInt, "preview": preview, "url": "/chat"})
 
 			// echo back to sender
 			c.Send <- encoded
@@ -259,12 +265,16 @@ func (c *Client) readPump() {
 				if ok {
 					memberClient.Send <- encoded
 				}
-				// persist notification per member
-				_ = handlers.CreateNotification(rid, senderIDInt, "group_message", fmt.Sprintf("New message in group %d", raw.GroupID))
+				// persist & publish structured group_message notification (preview + link)
+				preview := raw.Content
+				if len(preview) > 140 {
+					preview = preview[:140]
+				}
+				_ = handlers.Notify(rid, senderIDInt, "group_message", map[string]interface{}{"message_id": gmID, "group_id": raw.GroupID, "preview": preview, "url": fmt.Sprintf("/groups/%d", raw.GroupID)})
 			}
 			// also echo to sender
 			c.Send <- encoded
-			_ = handlers.CreateNotification(senderIDInt, senderIDInt, "group_message_sent", fmt.Sprintf("Message sent to group %d", raw.GroupID))
+			_ = handlers.Notify(senderIDInt, senderIDInt, "group_message_sent", map[string]interface{}{"message_id": gmID, "group_id": raw.GroupID})
 			continue
 		}
 

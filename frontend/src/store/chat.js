@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from '@/store/auth'
 import { fetchHistory } from '@/api/chat'
+import { fetchGroupMessages } from '@/api/groups'
+import { useNotificationStore } from '@/store/notification'
 
 const normalizeAvatar = (path) => {
 	if (!path) return ''
@@ -23,6 +25,9 @@ export const useChatStore = defineStore('chat', {
 		// batching for incoming realtime messages
 		_incomingBuffer: [],
 		_incomingFlushTimer: null,
+		// group chat storage: keyed by group id
+		groupConversations: {},
+		_activeGroupId: null,
 	}),
 	getters: {
 		activeConversation(state) {
@@ -38,8 +43,12 @@ export const useChatStore = defineStore('chat', {
 		connect() {
 			if (this.socket && this.connected) return
 
-			const url = `ws://${location.host}/ws`
+			// connect to backend websocket (backend runs on :8080)
+			const backendHost = window.location.hostname || 'localhost'
+			const url = `ws://${backendHost}:8080/ws`
 			this.socket = new WebSocket(url)
+
+			console.log('chat: connecting to', url)
 
 			this.socket.onopen = () => {
 				this.connected = true
@@ -53,6 +62,8 @@ export const useChatStore = defineStore('chat', {
 
 				// Request user list after connection established
 				this.requestUserList()
+
+				console.log('chat: connected as user', this.currentUserId)
 			}
 
 			this.socket.onmessage = (event) => {
@@ -63,10 +74,30 @@ export const useChatStore = defineStore('chat', {
 					console.error('chat: invalid payload', err)
 					return
 				}
+				// forward certain payloads to notification store for realtime UX
+				const notifTypes = new Set(['group_invite','group_invite_response','group_join_request','group_join_response','group_event','new_message','group_message','new_follower','follow_request','follow_request_accepted','follow_request_declined'])
+				if (payload && payload.type && notifTypes.has(payload.type)) {
+					try {
+						const notifStore = useNotificationStore()
+						const tempId = -Date.now()
+						notifStore.list.unshift({
+							id: tempId,
+							recipient_id: Number(this.getCurrentUserId()) || 0,
+							actor_id: 0,
+							type: payload.type,
+							data: JSON.stringify(payload.data || {}),
+							is_read: false,
+							created_at: new Date().toISOString(),
+						})
+					} catch (e) {
+						console.error('Failed to push realtime notification', e)
+					}
+				}
 				this.handleMessage(payload)
 			}
 
 			this.socket.onclose = () => {
+				console.log('chat: disconnected')
 				this.connected = false
 				this.socket = null
 			}
@@ -78,6 +109,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		disconnect() {
+			console.log('chat: disconnecting')
 			if (this.socket) this.socket.close()
 			this.socket = null
 			this.connected = false
@@ -130,6 +162,9 @@ export const useChatStore = defineStore('chat', {
 				case 'stop_typing':
 					delete this.typingUsers[String(msg.sender_id)]
 					break
+				case 'group_message':
+					this.handleGroupMessage(msg)
+					break
 				case 'error':
 					this.pushError(msg.content || 'Unable to deliver message.')
 					break
@@ -138,6 +173,91 @@ export const useChatStore = defineStore('chat', {
 				default:
 					break
 			}
+		},
+
+		handleGroupMessage(msg) {
+			// msg should contain group_id, sender_id, content, id, sender_name
+			const gid = msg.group_id ? String(msg.group_id) : null
+			if (!gid) return
+			if (!this.groupConversations[gid]) this.groupConversations[gid] = []
+			const me = this.getCurrentUserId()
+			this.groupConversations[gid].push({
+				id: msg.id || `${Date.now()}-${this.groupConversations[gid].length}`,
+				content: msg.content,
+				outgoing: String(msg.sender_id) === me,
+				senderName: msg.sender_name || '',
+				timestamp: msg.created_at || new Date().toISOString(),
+			})
+		},
+
+		async fetchGroupHistory(groupId) {
+			if (!groupId) return []
+			try {
+				const { data } = await fetchGroupMessages(groupId)
+				// ensure array exists
+				this.groupConversations[String(groupId)] = []
+				const me = this.getCurrentUserId()
+				if (Array.isArray(data)) {
+					data.forEach((m) => {
+						this.groupConversations[String(groupId)].push({
+							id: m.id,
+							content: m.content,
+							outgoing: String(m.sender_id) === me,
+							senderName: m.sender_name || '',
+							timestamp: m.created_at || new Date().toISOString(),
+						})
+					})
+				}
+				return this.groupConversations[String(groupId)]
+			} catch (err) {
+				console.error('Failed to load group history', err)
+				return []
+			}
+		},
+
+		async loadMoreGroupHistory(groupId, limit = 50) {
+			if (!groupId) return 0
+			const key = String(groupId)
+			const conv = this.groupConversations[key] || []
+			let beforeId = null
+			if (conv.length > 0) {
+				beforeId = conv[0].id
+			}
+			try {
+				const { data } = await fetchGroupMessages(groupId, { before_id: beforeId, limit })
+				if (!Array.isArray(data) || data.length === 0) return 0
+				// prepend older messages
+				const me = this.getCurrentUserId()
+				const items = data.map((m) => ({
+					id: m.id,
+					content: m.content,
+					outgoing: String(m.sender_id) === me,
+					senderName: m.sender_name || '',
+					timestamp: m.created_at || new Date().toISOString(),
+				}))
+				this.groupConversations[key] = items.concat(this.groupConversations[key] || [])
+				return items.length
+			} catch (err) {
+				console.error('Failed to load more group history', err)
+				return 0
+			}
+		},
+
+		sendGroupMessage(payload) {
+			const body = { ...payload }
+			if (!body.type) body.type = 'group_message'
+			if (!body.group_id) {
+				this.pushError('Group id required')
+				return false
+			}
+			if (!body.content || !body.content.trim()) return false
+			body.content = body.content.trim()
+			if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+				this.socket.send(JSON.stringify(body))
+			} else {
+				this.messageQueue.push(body)
+			}
+			return true
 		},
 
 		bufferIncomingMessage(msg) {
@@ -282,7 +402,7 @@ export const useChatStore = defineStore('chat', {
 							})
 						})
 					} else {
-						console.warn('fetchHistory returned non-array:', data)
+						console.warn('fetchHistory returned non-array?:', data)
 					}
 					this.markRead(this.activeContactId)
 				} catch (err) {

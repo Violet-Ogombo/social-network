@@ -11,7 +11,7 @@ export const useAuthStore = defineStore('auth', {
     async login(identifier, password) {
       const userData = await api.login(identifier, password);
       // normalize response { user_id: '...' }
-      this.user = { user_id: userData.user_id }
+      this.user = { user_id: userData.user_id, nickname: userData.nickname || null };
       // auto-connect chat
       const chat = useChatStore()
       chat.connect()

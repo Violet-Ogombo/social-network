@@ -55,11 +55,19 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/group", handlers.GetGroupHandler)
 	mux.Handle("/api/group/invite", AuthMiddleware(http.HandlerFunc(handlers.InviteHandler)))
 	mux.Handle("/api/group/invite/respond", AuthMiddleware(http.HandlerFunc(handlers.RespondInviteHandler)))
+	mux.Handle("/api/group/membership", AuthMiddleware(http.HandlerFunc(handlers.CheckMembershipHandler)))
+	mux.Handle("/api/group/request", AuthMiddleware(http.HandlerFunc(handlers.RequestToJoinHandler)))
+	mux.Handle("/api/group/request/respond", AuthMiddleware(http.HandlerFunc(handlers.RespondRequestHandler)))
+	mux.Handle("/api/group/requests", AuthMiddleware(http.HandlerFunc(handlers.ListRequestsHandler)))
+	mux.Handle("/api/group/request/status", AuthMiddleware(http.HandlerFunc(handlers.GetRequestStatusHandler)))
 	mux.Handle("/api/group/post/create", AuthMiddleware(http.HandlerFunc(handlers.CreateGroupPostHandler)))
 	mux.HandleFunc("/api/group/posts", handlers.ListGroupPostsHandler)
+	// group messages history
+	mux.Handle("/api/group/messages", AuthMiddleware(http.HandlerFunc(handlers.ListGroupMessagesHandler)))
 	mux.Handle("/api/group/comment", AuthMiddleware(http.HandlerFunc(handlers.AddGroupCommentHandler)))
 	mux.Handle("/api/group/event/create", AuthMiddleware(http.HandlerFunc(handlers.CreateEventHandler)))
 	mux.Handle("/api/group/event/vote", AuthMiddleware(http.HandlerFunc(handlers.VoteEventHandler)))
+	mux.Handle("/api/group/events", AuthMiddleware(http.HandlerFunc(handlers.ListEventsHandler)))
 	mux.Handle("/api/posts/comment", AuthMiddleware(http.HandlerFunc(handlers.AddCommentHandler)))
 
 	// serve uploaded images

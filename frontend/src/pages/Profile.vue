@@ -159,40 +159,7 @@
                 </div>
               </div>
 
-              <!-- Follow Requests Card (only for own profile) -->
-              <div v-if="isMine" class="card mb-4">
-                <div class="card-header bg-gradient d-flex justify-content-between align-items-center">
-                  <h5 class="mb-0 text-white"><i class="fas fa-user-check me-2"></i>Follow Requests</h5>
-                  <span class="badge bg-light text-primary">{{ followRequests.length }}</span>
-                </div>
-                <div class="card-body">
-                  <div v-if="followRequests.length === 0" class="text-center py-3 text-muted">
-                    No pending requests
-                  </div>
-                  <div v-else class="list-group list-group-flush">
-                    <div v-for="req in followRequests" :key="req.id" class="list-group-item">
-                      <div class="d-flex align-items-center justify-content-between">
-                        <div class="d-flex align-items-center gap-3">
-                          <img v-if="req.sender_avatar" :src="req.sender_avatar" alt="avatar" class="rounded-circle" style="width:36px;height:36px;object-fit:cover;" />
-                          <i v-else class="fas fa-user-circle fa-2x text-primary"></i>
-                          <div>
-                            <strong>{{ req.sender_nickname || ('User #' + req.sender_id) }}</strong>
-                            <div class="text-muted small">Requested {{ req.created_at || 'recently' }}</div>
-                          </div>
-                        </div>
-                        <div class="btn-group">
-                          <button class="btn btn-sm btn-success" @click="handleAccept(req.sender_id)">
-                            <i class="fas fa-check"></i>
-                          </button>
-                          <button class="btn btn-sm btn-outline-danger" @click="handleDecline(req.sender_id)">
-                            <i class="fas fa-times"></i>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <!-- Follow Requests Card removed per UX request -->
 
               <!-- Followers Card -->
               <div class="card mb-4">
@@ -305,7 +272,10 @@ export default {
       if (!userId.value) return
       
       try {
-        profile.value = await api.getProfile(userId.value)
+        console.log('Loading profile for user ID:', userId.value)
+        const p = await api.getProfile(userId.value)
+        // defensive: ensure we always have an object
+        profile.value = (p && typeof p === 'object') ? p : { is_accessible: false }
 
         // If profile is not accessible, we only need to check follow status
         if (!profile.value.is_accessible) {
@@ -318,9 +288,12 @@ export default {
         }
 
         // If accessible, load all data
-        followers.value = await api.getFollowers(userId.value)
-        followingList.value = await api.getFollowing(userId.value)
-        posts.value = await listPosts(userId.value)
+        const f = await api.getFollowers(userId.value)
+        followers.value = Array.isArray(f) ? f : []
+        const fl = await api.getFollowing(userId.value)
+        followingList.value = Array.isArray(fl) ? fl : []
+        const pList = await listPosts(userId.value)
+        posts.value = Array.isArray(pList) ? pList : []
         if (isMine.value) {
           await refreshRequests()
         } else {
@@ -341,6 +314,10 @@ export default {
       } catch (error) {
         console.error("Failed to load profile data:", error)
         profile.value = { is_accessible: false, nickname: 'Error', avatar: null, profile_type: 'private' } // Show private view on error
+        followers.value = []
+        followingList.value = []
+        posts.value = []
+        followRequests.value = []
       }
     }
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"social-network/backend/db"
 	"social-network/backend/utils"
@@ -65,6 +66,7 @@ func GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 			utils.Error(w, http.StatusNotFound, "User not found")
 			return
 		}
+		fmt.Println("error getting profile 1:", err)
 		utils.Error(w, http.StatusInternalServerError, "Failed to fetch user")
 		return
 	}
@@ -93,6 +95,7 @@ func GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				canViewProfile = true
 			} else if err != sql.ErrNoRows {
+				fmt.Println("error getting profile 2:", err)
 				utils.Error(w, http.StatusInternalServerError, "Failed to check follow status")
 				return
 			}
@@ -124,12 +127,15 @@ func GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 		Nickname    sql.NullString
 		About       sql.NullString
 		ProfileType sql.NullString
-		CreatedAt   sql.NullString
+		// CreatedAt   sql.NullString
 	}
 
-	err = db.DB.QueryRow(`SELECT id, email, first_name, last_name, date_of_birth, avatar, nickname, about_me, profile_type, created_at FROM users WHERE id = ?`, targetID).
-		Scan(&fullProfile.ID, &fullProfile.Email, &fullProfile.FirstName, &fullProfile.LastName, &fullProfile.DateOfBirth, &fullProfile.Avatar, &fullProfile.Nickname, &fullProfile.About, &fullProfile.ProfileType, &fullProfile.CreatedAt)
+	err = db.DB.QueryRow(`SELECT id, email, first_name, last_name, date_of_birth, avatar, nickname, about_me, profile_type FROM users WHERE id = ?`, targetID).
+		Scan(&fullProfile.ID, &fullProfile.Email, &fullProfile.FirstName, &fullProfile.LastName, &fullProfile.DateOfBirth, &fullProfile.Avatar, &fullProfile.Nickname, &fullProfile.About, &fullProfile.ProfileType)
+		// , created_at
+		//  &fullProfile.CreatedAt
 	if err != nil {
+		fmt.Println("error getting profile 3:", err)
 		utils.Error(w, http.StatusInternalServerError, "Failed to load profile data")
 		return
 	}
@@ -147,7 +153,7 @@ func GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 		"nickname":      fullProfile.Nickname.String,
 		"about":         fullProfile.About.String,
 		"profile_type":  profileType,
-		"created_at":    fullProfile.CreatedAt.String,
+		// "created_at":    fullProfile.CreatedAt.String,
 		"is_accessible": true,
 	}
 
