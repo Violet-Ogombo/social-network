@@ -47,9 +47,10 @@
                     <i v-else class="fas fa-user-circle fa-5x text-primary"></i>
                   </div>
                   <div v-if="isMine" class="edit-avatar-btn">
-                    <button class="btn btn-sm btn-outline-primary">
+                    <button class="btn btn-sm btn-outline-primary" @click.prevent="triggerAvatarPicker">
                       <i class="fas fa-camera"></i>
                     </button>
+                    <input ref="avatarPicker" type="file" accept="image/*" style="display:none" @change="onAvatarSelected" />
                   </div>
                 </div>
 
@@ -268,6 +269,15 @@ export default {
     const isMine = computed(() => auth.user && profile.value && String(auth.user.user_id) === String(profile.value.id))
     const postCount = computed(() => posts.value.length)
 
+  const avatarPicker = ref(null)
+    const msg = ref('')
+
+    const triggerAvatarPicker = () => {
+      if (avatarPicker.value) avatarPicker.value.click()
+    }
+
+    // avatar will be provided by the user as a URL only
+
     const load = async () => {
       if (!userId.value) return
       
@@ -387,7 +397,7 @@ export default {
 
     watch(userId, load, { immediate: true })
 
-    return { profile, followers, followingList, followRequests, posts, following, pending, postCount, isMine, load, changePrivacy, toggleFollow, handleAccept, handleDecline }
+    return { profile, followers, followingList, followRequests, posts, following, pending, postCount, isMine, load, changePrivacy, toggleFollow, handleAccept, handleDecline, avatarPicker, triggerAvatarPicker, onAvatarSelected, msg }
   }
 }
 </script>

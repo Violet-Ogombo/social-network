@@ -51,8 +51,14 @@
               </div>
             </div>
             <div>
-              <button class="btn btn-sm btn-success me-2" @click="handleRequest(r.id, 'accept')">Accept</button>
-              <button class="btn btn-sm btn-outline-secondary" @click="handleRequest(r.id, 'decline')">Decline</button>
+              <button :disabled="processingRequestIds.includes(r.id)" class="btn btn-sm btn-success me-2" @click="handleRequest(r.id, 'accept')">
+                <span v-if="processingRequestIds.includes(r.id)" class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                Accept
+              </button>
+              <button :disabled="processingRequestIds.includes(r.id)" class="btn btn-sm btn-outline-secondary" @click="handleRequest(r.id, 'decline')">
+                <span v-if="processingRequestIds.includes(r.id)" class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                Decline
+              </button>
             </div>
           </div>
         </div>
@@ -62,7 +68,7 @@
     <div v-for="p in posts" :key="p.id" class="card mb-2">
       <div class="card-body">
         <p>{{ p.content }}</p>
-        <img v-if="p.image_url" :src="p.image_url" class="img-fluid" />
+  <img v-if="p.image_url" :src="p.image_url" class="img-fluid" />
         <div class="mt-2">
           <Comment :postId="p.id" @comment-added="load" />
         </div>
@@ -142,7 +148,8 @@ export default {
       groupMessages: [],
       loadingGroupMessages: false,
       showEmojiPicker: false,
-      emojiList: ['😄','❤️','👍','😂','😢','🎉','👏','🔥','😎','🙌']
+      emojiList: ['😄','❤️','👍','😂','😢','🎉','👏','🔥','😎','🙌'],
+      processingRequestIds: []
     } },
   created() { this.load() },
   mounted() {
@@ -178,7 +185,7 @@ export default {
           this.followers = []
         }
       const postsRes = await listGroupPosts(id)
-      this.posts = postsRes.data
+        this.posts = postsRes.data
       // check membership to conditionally show create post UI
       await this.checkMembershipAPI(id)
       // init chat if member
@@ -295,13 +302,30 @@ export default {
       }
     },
     async handleRequest(requestId, action) {
+      // optimistic UI: mark processing and remove from list locally
+      if (this.processingRequestIds.includes(requestId)) return
+      this.processingRequestIds.push(requestId)
+      const originalRequests = [...this.requests]
+      // remove immediately so owner sees it disappear
+      this.requests = this.requests.filter(r => r.id !== requestId)
       try {
-        await respondRequest({ request_id: requestId, action })
-        this.requests = this.requests.filter(r => r.id !== requestId)
-        alert('Done')
+        const res = await respondRequest({ request_id: requestId, action })
+        // if accepted, increment local member count (group.members)
+        if (action === 'accept') {
+          try {
+            if (this.group && typeof this.group.members === 'number') {
+              this.group.members = Number(this.group.members) + 1
+            }
+          } catch (e) {}
+        }
+        alert(res && res.data && res.data.status ? (res.data.status) : 'Done')
       } catch (e) {
-        console.error(e)
-        alert('Failed')
+        // rollback on error
+        console.error('Respond request failed', e)
+        this.requests = originalRequests
+        alert('Failed to process request')
+      } finally {
+        this.processingRequestIds = this.processingRequestIds.filter(id => id !== requestId)
       }
     },
     addComment(postId) {

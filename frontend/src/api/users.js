@@ -16,6 +16,14 @@ export const updateProfile = async (payload) => {
   return res.data;
 }
 
+export const uploadAvatar = async (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('type', 'avatar');
+  const res = await apiClient.post('/api/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  return res.data; // expects { url: '/uploads/avatars/...' }
+}
+
 export const getFollowers = async (id) => {
   const url = id ? `/api/profile/followers?id=${id}` : '/api/profile/followers';
   const res = await apiClient.get(url);

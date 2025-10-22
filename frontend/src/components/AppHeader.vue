@@ -87,7 +87,7 @@
 					<div class="dropdown">
 						<button class="btn btn-outline-light dropdown-toggle d-flex align-items-center" 
 							@click="profileOpen = !profileOpen" aria-expanded="false">
-							<img v-if="user.avatar" :src="user.avatar" alt="avatar" 
+							<img v-if="user.avatar" :src="avatarSrc(user)" alt="avatar" 
 								 class="rounded-circle me-2" style="width: 24px; height: 24px;" />
 							<i v-else class="fas fa-user-circle me-2"></i>
 							{{ user.nickname || user.user_id || "You"}}

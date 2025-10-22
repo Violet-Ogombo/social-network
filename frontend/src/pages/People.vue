@@ -98,12 +98,7 @@ export default {
     const search = ref('')
     const error = ref('')
 
-    const resolveAvatar = (path) => {
-      if (!path) return ''
-      if (/^https?:/i.test(path)) return path
-      const normalized = path.startsWith('/') ? path : `/${path}`
-      return `${window.location.protocol}//${window.location.host}${normalized}`
-    }
+  const resolveAvatar = (path) => path
 
     const normalizeUser = (user) => ({
       ...user,

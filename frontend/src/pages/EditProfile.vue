@@ -5,7 +5,9 @@
       <input v-model="form.nickname" placeholder="Nickname" />
       <input v-model="form.first_name" placeholder="First name" />
       <input v-model="form.last_name" placeholder="Last name" />
-      <input v-model="form.avatar" placeholder="Avatar URL" />
+      <div style="display:flex; gap:8px; align-items:center">
+        <input v-model="form.avatar" placeholder="Avatar URL" />
+      </div>
       <textarea v-model="form.about" placeholder="About"></textarea>
       <label>Profile type:
         <select v-model="form.profile_type">
@@ -68,6 +70,8 @@ export default {
         msg.value = 'Failed to update profile'
       }
     }
+
+    // avatar is provided as a URL
 
     const cancel = () => router.back()
 

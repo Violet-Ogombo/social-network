@@ -91,8 +91,16 @@ func GetGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get members count
 	var memberCount int
 	db.DB.QueryRow("SELECT COUNT(1) FROM group_members WHERE group_id = ?", gid).Scan(&memberCount)
+	// convert sql.NullString to plain string for JSON response
+	groupObj := map[string]interface{}{
+		"id":          g.ID,
+		"owner_id":    g.OwnerID,
+		"name":        g.Name,
+		"description": g.Description.String,
+		"created_at":  g.Created,
+	}
 	resp := map[string]interface{}{
-		"group":   g,
+		"group":   groupObj,
 		"members": memberCount,
 	}
 	utils.JSON(w, http.StatusOK, resp)
@@ -202,13 +210,15 @@ func CreateGroupPostHandler(w http.ResponseWriter, r *http.Request) {
 	file, fh, err := r.FormFile("image")
 	if err == nil && file != nil {
 		defer file.Close()
-		// save to uploads
-		os.MkdirAll("uploads", 0755)
+		// save to backend/uploads/posts to match upload endpoint and served static path
+		saveDir := filepath.Join("backend", "uploads", "posts")
+		os.MkdirAll(saveDir, 0755)
 		fname := fmt.Sprintf("group_%d_%s", gid, filepath.Base(fh.Filename))
-		dst, _ := os.Create(filepath.Join("uploads", fname))
+		dstPath := filepath.Join(saveDir, fname)
+		dst, _ := os.Create(dstPath)
 		defer dst.Close()
 		io.Copy(dst, file)
-		imageURL = "/uploads/" + fname
+		imageURL = "/uploads/posts/" + fname
 	}
 	// ensure user is a member
 	var cnt int
@@ -557,7 +567,7 @@ func ListRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(`SELECT gr.id, gr.requester_id, u.nickname, u.avatar, gr.status, gr.created_at
 		FROM group_requests gr
 		JOIN users u ON gr.requester_id = u.id
-		WHERE gr.group_id = ?
+		WHERE gr.group_id = ? AND gr.status = 'pending'
 		ORDER BY gr.created_at DESC`, gid)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Failed to query requests")

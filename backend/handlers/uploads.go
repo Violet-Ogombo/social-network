@@ -53,15 +53,14 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		savePath = filepath.Join("backend", "uploads", "posts", filename)
 	}
 
-	// Create the destination file
+	// Create the destination file and copy the uploaded bytes directly
+	os.MkdirAll(filepath.Dir(savePath), 0755)
 	dst, err := os.Create(savePath)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Could not create file on server")
 		return
 	}
 	defer dst.Close()
-
-	// Copy the uploaded file's content to the destination file
 	if _, err := io.Copy(dst, file); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Could not save file")
 		return

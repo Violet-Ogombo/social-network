@@ -67,11 +67,12 @@
 							</div>
 
 							<div class="mb-3">
-								<label class="form-label fw-semibold">Avatar URL</label>
-								<input v-model="avatar" 
-									   type="url" 
-									   class="form-control" 
+								<label class="form-label fw-semibold">Avatar</label>
+								<input v-model="avatar"
+									   type="url"
+									   class="form-control"
 									   placeholder="https://example.com/avatar.jpg" />
+								<small class="form-text text-muted">Paste a public image URL for your avatar</small>
 							</div>
 
 							<div class="mb-3">
@@ -120,6 +121,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/store/auth'
 import { useRouter } from 'vue-router'
+// avatar uploads/resize removed — users paste avatar URL only
 
 export default {
 	setup() {
@@ -145,6 +147,7 @@ export default {
 					about_me: about_me.value,
 					profile_type: profile_type.value,
 				})
+				// avatar is provided as a URL by the user (no upload)
 				// fetch user and go home
 				await auth.fetchUser()
 				router.push('/')

@@ -1,0 +1,24 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: social-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_PATH=/app/backend/socialnetwork.db
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/socialnetwork.db:/app/backend/socialnetwork.db
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: social-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend

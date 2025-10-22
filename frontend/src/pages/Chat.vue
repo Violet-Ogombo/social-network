@@ -61,7 +61,7 @@
 					<div v-if="activeContact" class="conversation h-100 d-flex flex-column">
 						<div class="conversation-header border-bottom px-4 py-3 d-flex align-items-center justify-content-between">
 							<div class="d-flex align-items-center gap-3">
-								<div class="avatar">
+									<div class="avatar">
 									<img v-if="activeContact.avatar" :src="activeContact.avatar" alt="avatar" />
 									<div v-else class="placeholder">
 										<i class="fas fa-user"></i>
@@ -238,6 +238,7 @@ export default {
 		})
 
 		return {
+			
 			search,
 			draft,
 			errorBanner,

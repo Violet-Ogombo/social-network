@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  social-network:
+    build: .
+    container_name: social-network-app
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    environment:
+      - DB_PATH=/app/backend/socialnetwork.db
+    volumes:
+      - ./backend/uploads:/app/uploads
